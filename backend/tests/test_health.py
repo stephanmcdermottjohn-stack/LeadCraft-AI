@@ -21,6 +21,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "")
     monkeypatch.setenv("WHATSAPP_ACCESS_TOKEN", "")
     monkeypatch.setenv("WHATSAPP_PHONE_NUMBER_ID", "")
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
     # get_settings is lru_cached; clear so the new env is picked up.
     from app import config, db
 

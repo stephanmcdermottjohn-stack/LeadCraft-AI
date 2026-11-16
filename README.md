@@ -39,7 +39,7 @@ pytest
 ## Phase status
 | Phase | Scope | Status |
 |---|---|---|
-| 1 | Skeleton, health API, DB schema (6 tables), deploy pipeline | 🚧 in progress |
+| 1 | Skeleton, health API, auth (register/login/me), DB schema (6 tables), Supabase connected, deploy pipeline | 🚧 in progress |
 | 2 | AI content engine + scheduling | not started |
 | 3 | Compliant lead capture (Meta Lead Ads, landing pages, property module) | not started |
 | 4 | WhatsApp chatbot + CRM funnel (Chatwoot + n8n) | not started |
