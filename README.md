@@ -41,11 +41,19 @@ pytest
 ## Phase status
 | Phase | Scope | Status |
 |---|---|---|
-| 1 | Skeleton, health API, auth (register/login/me), DB schema (6 tables), Supabase connected, deploy pipeline | ✅ done (local) |
+| 1 | Skeleton, health API, auth (register/login/me), DB schema (6 tables), Supabase connected, deploy pipeline | ✅ done + deployed |
 | 2 | AI content engine + scheduling | ✅ core done: generate (mock/gemini), schedule, due-worker, settings personalization, Content+Settings UI |
 | 3 | Compliant lead capture (Meta Lead Ads, landing pages, property module) | 🚧 core done: landing pages `/l/<slug>` + consent-first lead capture + Leads dashboard; Meta webhook pending dev account |
 | 4 | WhatsApp chatbot + CRM funnel (Chatwoot + n8n) | not started |
 | 5 | Integration, pilot | not started |
+
+## Live deployment (Vercel, free tier)
+
+- **Frontend:** https://lead-craft-ai.vercel.app (dashboard at `/`, public landing pages at `/l/<slug>`)
+- **API:** https://lead-craft-api.vercel.app (FastAPI on Vercel Functions, Python 3.12)
+- **DB:** Supabase Postgres (pooler); env vars live in Vercel project settings — never in the repo
+- Deploy: `powershell -ExecutionPolicy Bypass -File scripts_local/vercel_deploy.ps1 -Which backend|frontend` (token in `.vercel-token`, gitignored)
+- Serverless notes: background worker loop is disabled (`APP_DISABLE_SCHEDULER=1`); due scheduled posts flip to `ready_to_publish` lazily on posts read. Cold starts re-run `create_all` (idempotent).
 
 ## Notes
 - Secrets: copy `docs/.env.example` → `backend/.env`; never commit real keys.
