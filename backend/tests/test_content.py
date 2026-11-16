@@ -81,7 +81,7 @@ def test_generate_uses_client_settings_not_business_name_only(client, auth_heade
 
 def test_settings_roundtrip(client, auth_headers):
     empty = client.get("/api/settings", headers=auth_headers).json()["settings"]
-    assert empty == {"niche": "", "target_area": "", "brand_voice": ""}
+    assert empty == {"niche": "", "target_area": "", "brand_voice": "", "landing_slug": None}
     res = client.patch(
         "/api/settings",
         json={"niche": "salon", "target_area": "DHA", "brand_voice": "premium"},
@@ -91,6 +91,12 @@ def test_settings_roundtrip(client, auth_headers):
     assert res.json()["settings"]["brand_voice"] == "premium"
     assert client.get("/api/settings", headers=auth_headers).json()["settings"]["niche"] == "salon"
     assert client.get("/api/settings").status_code == 401
+    # Omitted fields keep their values (no accidental wipe by a slug-only PATCH).
+    res = client.patch("/api/settings", json={"landing_slug": "salon-page"}, headers=auth_headers)
+    assert res.status_code == 200
+    kept = res.json()["settings"]
+    assert kept["niche"] == "salon" and kept["brand_voice"] == "premium"
+    assert kept["landing_slug"] == "salon-page"
 
 
 def test_generate_rejects_bad_platform(client, auth_headers):

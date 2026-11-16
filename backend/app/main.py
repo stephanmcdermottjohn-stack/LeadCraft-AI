@@ -10,6 +10,8 @@ from app import db as db_module
 from app.api.auth import router as auth_router
 from app.api.content import router as content_router
 from app.api.health import router as health_router
+from app.api.leads import router as leads_router
+from app.api.public import router as public_router
 from app.api.settings import router as settings_router
 from app.config import get_settings
 from app.models import Base
@@ -61,6 +63,8 @@ def create_app() -> FastAPI:
     app.include_router(auth_router)
     app.include_router(content_router)
     app.include_router(settings_router)
+    app.include_router(leads_router)
+    app.include_router(public_router)
 
     # MVP convenience: create tables on boot. Replace with Alembic before
     # any real production data exists.

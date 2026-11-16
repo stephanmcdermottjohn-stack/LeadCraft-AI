@@ -43,6 +43,9 @@ class ClientSettings(Base):
     niche: Mapped[str] = mapped_column(String(200), default="")
     target_area: Mapped[str] = mapped_column(String(200), default="")
     brand_voice: Mapped[str] = mapped_column(String(500), default="")
+    # Public landing page slug: /l/<landing_slug>. Unique; the lead form on
+    # that page captures consented leads with source='landing_page'.
+    landing_slug: Mapped[str | None] = mapped_column(String(100), unique=True, nullable=True)
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     user: Mapped[User] = relationship(back_populates="settings")
