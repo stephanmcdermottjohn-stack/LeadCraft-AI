@@ -37,6 +37,9 @@ class Settings(BaseSettings):
     whatsapp_access_token: str = ""
     whatsapp_phone_number_id: str = ""
     meta_verify_token: str = ""
+    # Extra CORS origins for production (comma-separated), e.g. the Vercel
+    # frontend domain when the API runs on a separate project.
+    cors_origins: str = ""
 
 
 @lru_cache

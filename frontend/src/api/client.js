@@ -23,11 +23,15 @@ export function getUser() {
   }
 }
 
+// API base: empty = same origin (local dev proxy). In production the frontend
+// and API run as separate Vercel projects, so VITE_API_BASE points at the API.
+const API_BASE = import.meta.env.VITE_API_BASE ?? "";
+
 export async function api(path, options = {}) {
   const token = getToken();
   const headers = { "Content-Type": "application/json" };
   if (token) headers["Authorization"] = `Bearer ${token}`;
-  const res = await fetch(path, { headers, ...options });
+  const res = await fetch(API_BASE + path, { headers, ...options });
   if (!res.ok) {
     let detail = await res.text();
     try {

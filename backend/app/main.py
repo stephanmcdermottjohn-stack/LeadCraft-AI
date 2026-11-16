@@ -50,10 +50,12 @@ def create_app() -> FastAPI:
     app = FastAPI(title=settings.app_name, version=settings.app_version, lifespan=lifespan)
     app.state.db_engine = db_module.engine
 
-    # Frontend origin; tighten per environment in production.
+    # Frontend origin; extend via CORS_ORIGINS env (comma-separated) in prod.
+    default_origins = ["http://localhost:5173", "http://127.0.0.1:5173"]
+    extra_origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+        allow_origins=default_origins + extra_origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

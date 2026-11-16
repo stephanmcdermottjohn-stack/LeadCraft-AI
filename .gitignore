@@ -18,3 +18,5 @@ dist/
 # OS / editor
 .DS_Store
 Thumbs.db
+
+.vercel-token
