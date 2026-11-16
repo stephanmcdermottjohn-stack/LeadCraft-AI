@@ -190,6 +190,36 @@ def test_gemini_adapter_maps_errors(monkeypatch):
     assert e403.value.code == "invalid-credentials"
 
 
+def test_gemini_adapter_retries_503_then_succeeds(monkeypatch):
+    """503 UNAVAILABLE ('high demand') is transient — adapter retries with backoff."""
+    responses = [httpx.Response(503, json={"error": {"message": "high demand"}}),
+                 httpx.Response(200, json={"candidates": [{"content": {"parts": [{"text": "recovered"}]}}]})]
+    calls = []
+
+    def fake_post(url, **kw):
+        calls.append(url)
+        return responses.pop(0)
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    text = llm.gemini_generate_text("p", "k", "m", retry_delays_s=(0, 0))
+    assert text == "recovered"
+    assert len(calls) == 2
+
+
+def test_gemini_adapter_gives_up_after_retries(monkeypatch):
+    calls = []
+
+    def fake_post(url, **kw):
+        calls.append(url)
+        return httpx.Response(503, json={"error": {"message": "high demand"}})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    with pytest.raises(llm.LLMError) as exc:
+        llm.gemini_generate_text("p", "k", "m", retry_delays_s=(0, 0))
+    assert exc.value.code == "api-error"
+    assert len(calls) == 3
+
+
 def test_parse_options_splits_and_caps():
     assert llm.parse_options("a\n---\nb\n---\nc", 2) == ["a", "b"]
     with pytest.raises(llm.LLMError):

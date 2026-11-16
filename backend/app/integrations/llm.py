@@ -15,6 +15,7 @@ An adapter NEVER makes a network call without its credential present; a
 missing key is a typed error, not a silent mock fallback.
 """
 import re
+import time
 from dataclasses import dataclass
 
 import httpx
@@ -68,7 +69,14 @@ def parse_options(text: str, count: int) -> list[str]:
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com"
 
 
-def gemini_generate_text(prompt: str, api_key: str, model: str, timeout_s: float = 60.0) -> str:
+def gemini_generate_text(
+    prompt: str,
+    api_key: str,
+    model: str,
+    timeout_s: float = 60.0,
+    max_attempts: int = 3,
+    retry_delays_s: tuple[float, ...] = (2.0, 6.0),
+) -> str:
     if not api_key:
         raise LLMError(
             "gemini",
@@ -76,33 +84,49 @@ def gemini_generate_text(prompt: str, api_key: str, model: str, timeout_s: float
             "GEMINI_API_KEY is not set. Get a free key at https://aistudio.google.com/api-keys (no credit card), "
             "then set LLM_PROVIDER=gemini and GEMINI_API_KEY in backend/.env. Mock provider is used meanwhile.",
         )
-    try:
-        response = httpx.post(
-            f"{GEMINI_BASE_URL}/v1beta/models/{model}:generateContent",
-            headers={"x-goog-api-key": api_key, "Content-Type": "application/json"},
-            json={"contents": [{"parts": [{"text": prompt}]}]},
-            timeout=timeout_s,
-        )
-    except httpx.HTTPError as exc:
-        raise LLMError("gemini", "network-error", f"Gemini API unreachable: {exc}") from exc
+    # Gemini returns 503 UNAVAILABLE ("high demand") intermittently on free
+    # tier; official guidance is exponential backoff + retry. 429/401/403 are
+    # NOT retried (rate limit needs waiting / key is broken).
+    last_error: LLMError | None = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            response = httpx.post(
+                f"{GEMINI_BASE_URL}/v1beta/models/{model}:generateContent",
+                headers={"x-goog-api-key": api_key, "Content-Type": "application/json"},
+                json={"contents": [{"parts": [{"text": prompt}]}]},
+                timeout=timeout_s,
+            )
+        except httpx.HTTPError as exc:
+            last_error = LLMError("gemini", "network-error", f"Gemini API unreachable: {exc}")
+        else:
+            if response.status_code == 429:
+                raise LLMError("gemini", "rate-limited", "Gemini free-tier rate limit hit; retry in a minute.")
+            if response.status_code in (401, 403):
+                raise LLMError("gemini", "invalid-credentials", "Gemini rejected the API key (check GEMINI_API_KEY).")
+            if response.status_code == 503 and attempt < max_attempts:
+                delay = retry_delays_s[min(attempt - 1, len(retry_delays_s) - 1)]
+                time.sleep(delay)
+                continue
+            if response.status_code >= 400:
+                raise LLMError("gemini", "api-error", f"Gemini API error {response.status_code}: {response.text[:200]}")
 
-    if response.status_code == 429:
-        raise LLMError("gemini", "rate-limited", "Gemini free-tier rate limit hit; retry in a minute.")
-    if response.status_code in (401, 403):
-        raise LLMError("gemini", "invalid-credentials", "Gemini rejected the API key (check GEMINI_API_KEY).")
-    if response.status_code >= 400:
-        raise LLMError("gemini", "api-error", f"Gemini API error {response.status_code}: {response.text[:200]}")
+            try:
+                body = response.json()
+                candidates = body["candidates"]
+                parts = candidates[0]["content"]["parts"]
+                text = "".join(str(p.get("text", "")) for p in parts)
+            except (KeyError, IndexError, TypeError, ValueError) as exc:
+                raise LLMError(
+                    "gemini", "unexpected-response", f"Unrecognized Gemini response shape: {str(body)[:200]}"
+                ) from exc
+            if not text.strip():
+                raise LLMError("gemini", "empty-response", "Gemini returned an empty completion.")
+            return text
 
-    try:
-        body = response.json()
-        candidates = body["candidates"]
-        parts = candidates[0]["content"]["parts"]
-        text = "".join(str(p.get("text", "")) for p in parts)
-    except (KeyError, IndexError, TypeError, ValueError) as exc:
-        raise LLMError("gemini", "unexpected-response", f"Unrecognized Gemini response shape: {str(body)[:200]}") from exc
-    if not text.strip():
-        raise LLMError("gemini", "empty-response", "Gemini returned an empty completion.")
-    return text
+        if attempt < max_attempts:
+            delay = retry_delays_s[min(attempt - 1, len(retry_delays_s) - 1)]
+            time.sleep(delay)
+    raise last_error or LLMError("gemini", "api-error", "Gemini call failed after retries.")
 
 
 # --- Router ------------------------------------------------------------------

@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     # 2026-11-16). Model name is configurable because model IDs drift.
     llm_provider: str = "mock"
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-3.8-flash"
+    gemini_model: str = "gemini-3.5-flash"
 
     # Future paid provider (kept for Phase 2+ upgrade path; unused while budget=0).
     anthropic_api_key: str = ""
