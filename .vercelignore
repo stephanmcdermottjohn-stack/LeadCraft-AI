@@ -1,0 +1,8 @@
+# Never ship these to Vercel.
+backend/.venv/
+frontend/node_modules/
+.git/
+*.db
+__pycache__/
+.pytest_cache/
+.vercel/

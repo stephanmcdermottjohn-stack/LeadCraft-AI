@@ -89,6 +89,11 @@ def schedule(body: ScheduleBody, user: User = Depends(get_current_user), db: Ses
 
 @router.get("/posts")
 def list_posts(user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
+    # Lazy due-post pass: the background worker loop cannot run on serverless
+    # hosting (Vercel), so reads also flip due posts. Idempotent + cheap.
+    from app.workers.content_worker import run_due_posts_pass
+
+    run_due_posts_pass(db)
     rows = db.scalars(
         select(ContentPost)
         .where(ContentPost.user_id == user.id)
