@@ -4,8 +4,9 @@ uvicorn[standard]==0.34.0
 
 # Database
 SQLAlchemy==2.0.36
-# Postgres driver for production (Supabase). Install when connecting:
-# psycopg2-binary==2.9.10
+# Postgres driver — required in production (Supabase). Local dev uses SQLite
+# but installing this locally is harmless.
+psycopg2-binary==2.9.10
 
 # Config & validation
 pydantic==2.10.4
