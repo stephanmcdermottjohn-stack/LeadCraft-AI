@@ -1,17 +1,51 @@
 """FastAPI application factory."""
+import asyncio
+import os
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import db as db_module
 from app.api.auth import router as auth_router
+from app.api.content import router as content_router
 from app.api.health import router as health_router
+from app.api.settings import router as settings_router
 from app.config import get_settings
 from app.models import Base
 
 
+async def _due_posts_loop() -> None:
+    """Phase 2 worker loop: flip due scheduled posts to ready_to_publish.
+    Honest scope: no auto-publish (Meta app review pending) — status only."""
+    from app.db import SessionLocal
+    from app.workers.content_worker import run_due_posts_pass
+
+    while True:
+        try:
+            db = SessionLocal()
+            try:
+                run_due_posts_pass(db)
+            finally:
+                db.close()
+        except Exception:  # noqa: BLE001 — worker must never kill the app
+            pass
+        await asyncio.sleep(60)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    task = None
+    if not os.environ.get("APP_DISABLE_SCHEDULER"):
+        task = asyncio.create_task(_due_posts_loop())
+    yield
+    if task:
+        task.cancel()
+
+
 def create_app() -> FastAPI:
     settings = get_settings()
-    app = FastAPI(title=settings.app_name, version=settings.app_version)
+    app = FastAPI(title=settings.app_name, version=settings.app_version, lifespan=lifespan)
     app.state.db_engine = db_module.engine
 
     # Frontend origin; tighten per environment in production.
@@ -25,6 +59,8 @@ def create_app() -> FastAPI:
 
     app.include_router(health_router)
     app.include_router(auth_router)
+    app.include_router(content_router)
+    app.include_router(settings_router)
 
     # MVP convenience: create tables on boot. Replace with Alembic before
     # any real production data exists.

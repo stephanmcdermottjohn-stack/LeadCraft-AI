@@ -1,6 +1,8 @@
-# Virtual Marketing & Lead Generation Platform
+# LeadCraft AI
 
 SaaS for SMBs/agencies/real-estate: AI content automation + compliant lead generation + CRM.
+
+**Current AI setup:** offline mock by default (zero cost, clearly labeled); Google Gemini free-tier adapter built and contract-tested — add a free key from https://aistudio.google.com/api-keys (no credit card), set `LLM_PROVIDER=gemini` + `GEMINI_API_KEY` in `backend/.env`, restart, done. No key required to run the whole product.
 
 **Ground rules (roadmap Section 0, enforced):** consent-based leads only, official WhatsApp Business Cloud API only, no group scraping/auto-joining, no outbound cold messaging. Every lead stores `source` + `consent_timestamp` for audit.
 
@@ -39,8 +41,8 @@ pytest
 ## Phase status
 | Phase | Scope | Status |
 |---|---|---|
-| 1 | Skeleton, health API, auth (register/login/me), DB schema (6 tables), Supabase connected, deploy pipeline | 🚧 in progress |
-| 2 | AI content engine + scheduling | not started |
+| 1 | Skeleton, health API, auth (register/login/me), DB schema (6 tables), Supabase connected, deploy pipeline | ✅ done (local) |
+| 2 | AI content engine + scheduling | ✅ core done: generate (mock/gemini), schedule, due-worker, settings personalization, Content+Settings UI |
 | 3 | Compliant lead capture (Meta Lead Ads, landing pages, property module) | not started |
 | 4 | WhatsApp chatbot + CRM funnel (Chatwoot + n8n) | not started |
 | 5 | Integration, pilot | not started |
