@@ -25,6 +25,8 @@ class SettingsBody(BaseModel):
     # Public landing page slug (optional). Omitted/empty on PATCH keeps the
     # existing slug; send "auto" to derive one from the business name.
     landing_slug: str | None = Field(default=None, max_length=100)
+    # Phase 3B property module toggle (real-estate extra fields on the form).
+    show_property_fields: bool | None = None
 
 
 def _slugify(text: str) -> str:
@@ -43,6 +45,7 @@ def _public(s: ClientSettings) -> dict:
         "target_area": s.target_area,
         "brand_voice": s.brand_voice,
         "landing_slug": s.landing_slug,
+        "show_property_fields": bool(s.show_property_fields),
     }
 
 
@@ -92,6 +95,9 @@ def update_settings(body: SettingsBody, user: User = Depends(get_current_user), 
             if _slug_taken(db, requested, user.id):
                 raise HTTPException(status_code=409, detail="That landing slug is already taken.")
             row.landing_slug = requested
+
+    if body.show_property_fields is not None:
+        row.show_property_fields = bool(body.show_property_fields)
 
     db.commit()
     return {"settings": _public(row)}

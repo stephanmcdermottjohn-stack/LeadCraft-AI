@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, clearSession, getUser, setSession } from "./api/client";
+import { api, clearSession, getToken, getUser, setSession } from "./api/client";
 
 const PLATFORMS = ["facebook", "instagram", "tiktok", "whatsapp_status", "other"];
 const NAV_ITEMS = ["Dashboard", "Content", "Leads", "Conversations", "Settings"];
@@ -221,7 +221,7 @@ function ContentPanel() {
 }
 
 function SettingsPanel({ user, onLogout }) {
-  const [settings, setSettings] = useState({ niche: "", target_area: "", brand_voice: "", landing_slug: null });
+  const [settings, setSettings] = useState({ niche: "", target_area: "", brand_voice: "", landing_slug: null, show_property_fields: false });
   const [slugInput, setSlugInput] = useState("");
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
@@ -243,6 +243,8 @@ function SettingsPanel({ user, onLogout }) {
         brand_voice: settings.brand_voice,
         // Empty input keeps the existing slug; "auto" derives from the name.
         landing_slug: slugInput === (settings.landing_slug ?? "") ? null : slugInput || null,
+        // Toggle is always sent so the checkbox is the source of truth.
+        show_property_fields: settings.show_property_fields,
       };
       const b = await api("/api/settings", { method: "PATCH", body: JSON.stringify(payload) });
       setSettings(b.settings);
@@ -307,6 +309,19 @@ function SettingsPanel({ user, onLogout }) {
             Public page: <a className="underline" href={`/l/${settings.landing_slug}`} target="_blank" rel="noreferrer">/l/{settings.landing_slug}</a> — share this with customers.
           </p>
         )}
+        <label className="block text-sm">
+          <span className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={settings.show_property_fields}
+              onChange={(e) => setSettings({ ...settings, show_property_fields: e.target.checked })}
+            />
+            Property fields on the landing page (real estate)
+          </span>
+          <span className="block text-xs text-slate-500 mt-1">
+            Adds optional buy/rent/sell, property type and budget fields to <code>/l/&lt;slug&gt;</code>.
+          </span>
+        </label>
         {error && <p className="text-xs text-red-400">{error}</p>}
         <button className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold hover:bg-sky-500" onClick={save}>
           Save
@@ -323,7 +338,7 @@ function SettingsPanel({ user, onLogout }) {
 
 function LandingPage({ slug }) {
   const [config, setConfig] = useState(null);
-  const [form, setForm] = useState({ name: "", phone: "", email: "", area: "", intent_notes: "" });
+  const [form, setForm] = useState({ name: "", phone: "", email: "", area: "", intent_notes: "", deal_type: "", property_type: "", budget: "" });
   const [consent, setConsent] = useState(false);
   const [done, setDone] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -351,6 +366,9 @@ function LandingPage({ slug }) {
           email: form.email,
           area: form.area,
           intent_notes: form.intent_notes,
+          deal_type: config.show_property_fields ? form.deal_type : "",
+          property_type: config.show_property_fields ? form.property_type : "",
+          budget: config.show_property_fields ? form.budget : "",
           company,
           consent,
         }),
@@ -424,6 +442,44 @@ function LandingPage({ slug }) {
                 onChange={(e) => setForm({ ...form, intent_notes: e.target.value })}
               />
             </label>
+            {config.show_property_fields && (
+              <div className="space-y-3 rounded-lg border border-slate-800 bg-slate-950 p-3">
+                <p className="text-xs text-slate-400 font-semibold">Property details (optional)</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="block text-sm">
+                    I want to
+                    <select
+                      className="mt-1 block w-full rounded-lg bg-slate-800 px-3 py-2"
+                      value={form.deal_type}
+                      onChange={(e) => setForm({ ...form, deal_type: e.target.value })}
+                    >
+                      <option value="">—</option>
+                      <option value="buy">Buy</option>
+                      <option value="rent">Rent</option>
+                      <option value="sell">Sell</option>
+                    </select>
+                  </label>
+                  <label className="block text-sm">
+                    Property type
+                    <input
+                      className="mt-1 block w-full rounded-lg bg-slate-800 px-3 py-2"
+                      placeholder="e.g. 5 Marla house"
+                      value={form.property_type}
+                      onChange={(e) => setForm({ ...form, property_type: e.target.value })}
+                    />
+                  </label>
+                </div>
+                <label className="block text-sm">
+                  Budget
+                  <input
+                    className="mt-1 block w-full rounded-lg bg-slate-800 px-3 py-2"
+                    placeholder="e.g. 2.5 crore / 80,000 per month"
+                    value={form.budget}
+                    onChange={(e) => setForm({ ...form, budget: e.target.value })}
+                  />
+                </label>
+              </div>
+            )}
             {/* Honeypot — visually hidden, humans never fill this */}
             <input
               aria-hidden="true"
@@ -465,16 +521,32 @@ function LandingPage({ slug }) {
 function LeadsPanel() {
   const [leads, setLeads] = useState([]);
   const [error, setError] = useState("");
+  const [q, setQ] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [sourceFilter, setSourceFilter] = useState("");
+  const [openNotes, setOpenNotes] = useState(null); // lead id
+  const [notes, setNotes] = useState({});
+  const [noteDraft, setNoteDraft] = useState("");
   const STATUSES = ["new", "contacted", "converted", "archived"];
+  const SOURCES = ["landing_page", "meta_lead_ad", "google_lead_form", "whatsapp_inbound", "direct_message"];
 
-  const loadLeads = () =>
-    api("/api/leads")
+  const loadLeads = (params = {}) => {
+    const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v));
+    setError("");
+    return api(`/api/leads${qs.size ? `?${qs}` : ""}`)
       .then((b) => setLeads(b.leads))
       .catch((err) => setError(err.message));
+  };
 
   useEffect(() => {
     loadLeads();
   }, []);
+
+  // Debounced re-fetch on filter changes
+  useEffect(() => {
+    const t = setTimeout(() => loadLeads({ q, status: statusFilter, source: sourceFilter }), 300);
+    return () => clearTimeout(t);
+  }, [q, statusFilter, sourceFilter]);
 
   const setStatus = async (id, status) => {
     try {
@@ -485,9 +557,81 @@ function LeadsPanel() {
     }
   };
 
+  const exportCsv = async () => {
+    try {
+      const token = getToken();
+      const res = await fetch("/api/leads/export.csv", { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) throw new Error(`Export failed (${res.status})`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `leads-${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Export failed.");
+    }
+  };
+
+  const toggleNotes = async (id) => {
+    if (openNotes === id) {
+      setOpenNotes(null);
+      return;
+    }
+    setOpenNotes(id);
+    if (!notes[id]) {
+      try {
+        const b = await api(`/api/leads/${id}/notes`);
+        setNotes((n) => ({ ...n, [id]: b.notes }));
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Notes failed.");
+      }
+    }
+  };
+
+  const addNote = async (id) => {
+    if (!noteDraft.trim()) return;
+    try {
+      const b = await api(`/api/leads/${id}/notes`, { method: "POST", body: JSON.stringify({ body: noteDraft }) });
+      setNotes((n) => ({ ...n, [id]: [b.note, ...(n[id] ?? [])] }));
+      setNoteDraft("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Note failed.");
+    }
+  };
+
+  const mdLine = (md) => {
+    const parts = [md.deal_type, md.property_type, md.budget].filter(Boolean);
+    return parts.length ? parts.join(" · ") : "";
+  };
+
   return (
     <div className="space-y-4 max-w-2xl">
       {error && <p className="text-xs text-red-400">{error}</p>}
+      <div className="flex flex-wrap gap-2 items-center">
+        <input
+          className="flex-1 min-w-40 rounded-lg bg-slate-800 px-3 py-2 text-sm"
+          placeholder="Search name, phone, email, area, notes…"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+        />
+        <select className="rounded-lg bg-slate-800 px-2 py-2 text-sm" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+          <option value="">All statuses</option>
+          {STATUSES.map((s) => (
+            <option key={s}>{s}</option>
+          ))}
+        </select>
+        <select className="rounded-lg bg-slate-800 px-2 py-2 text-sm" value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)}>
+          <option value="">All sources</option>
+          {SOURCES.map((s) => (
+            <option key={s}>{s}</option>
+          ))}
+        </select>
+        <button className="rounded-lg bg-slate-800 px-3 py-2 text-sm hover:bg-slate-700" onClick={exportCsv}>
+          Export CSV
+        </button>
+      </div>
       <div className="rounded-xl border border-slate-800 bg-slate-900 p-6">
         <h3 className="font-semibold mb-3">Leads ({leads.length})</h3>
         {leads.length === 0 && (
@@ -521,7 +665,38 @@ function LeadsPanel() {
                 {l.email}
                 {l.area ? ` · ${l.area}` : ""}
               </p>
+              {mdLine(l.metadata) && (
+                <p className="mt-1 text-xs text-sky-300">🏠 {mdLine(l.metadata)}</p>
+              )}
               {l.intent_notes && <p className="mt-1 text-slate-400 whitespace-pre-wrap">{l.intent_notes}</p>}
+              <button className="mt-2 text-xs text-slate-400 hover:text-slate-200" onClick={() => toggleNotes(l.id)}>
+                {openNotes === l.id ? "Hide notes" : `Notes${(notes[l.id]?.length ?? 0) ? ` (${notes[l.id].length})` : ""}`}
+              </button>
+              {openNotes === l.id && (
+                <div className="mt-2 space-y-2 border-t border-slate-800 pt-2">
+                  <div className="flex gap-2">
+                    <input
+                      className="flex-1 rounded bg-slate-800 px-2 py-1 text-xs"
+                      placeholder="Add a follow-up note…"
+                      value={noteDraft}
+                      onChange={(e) => setNoteDraft(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && addNote(l.id)}
+                    />
+                    <button className="rounded bg-sky-700 px-2 py-1 text-xs hover:bg-sky-600" onClick={() => addNote(l.id)}>
+                      Add
+                    </button>
+                  </div>
+                  <ul className="space-y-1">
+                    {(notes[l.id] ?? []).map((n) => (
+                      <li key={n.id} className="rounded bg-slate-950 p-2 text-xs">
+                        <span className="text-slate-500">{n.created_at ? new Date(n.created_at).toLocaleString() : ""}</span>
+                        <p className="text-slate-300 mt-0.5">{n.body}</p>
+                      </li>
+                    ))}
+                    {!(notes[l.id] ?? []).length && <li className="text-xs text-slate-500">No notes yet.</li>}
+                  </ul>
+                </div>
+              )}
             </li>
           ))}
         </ul>

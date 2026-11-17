@@ -24,4 +24,6 @@ def landing_config(slug: str, db: Session = Depends(get_db)) -> dict:
         "business_name": user.business_name if user else "",
         "niche": row.niche,
         "target_area": row.target_area,
+        # Phase 3B: landing page shows real-estate extras when enabled.
+        "show_property_fields": bool(row.show_property_fields),
     }

@@ -12,7 +12,7 @@ Design notes:
 """
 import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -46,6 +46,10 @@ class ClientSettings(Base):
     # Public landing page slug: /l/<landing_slug>. Unique; the lead form on
     # that page captures consented leads with source='landing_page'.
     landing_slug: Mapped[str | None] = mapped_column(String(100), unique=True, nullable=True)
+    # Phase 3B property module: when on, the landing page shows real-estate
+    # extras (buy/rent/sell, property type, budget) and the dashboard surfaces
+    # them. Off = plain service-business form.
+    show_property_fields: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     user: Mapped[User] = relationship(back_populates="settings")
@@ -89,6 +93,23 @@ class Lead(Base):
 
     user: Mapped[User] = relationship(back_populates="leads")
     conversations: Mapped[list["Conversation"]] = relationship(back_populates="lead")
+    notes: Mapped[list["LeadNote"]] = relationship(back_populates="lead")
+
+
+class LeadNote(Base):
+    """CRM follow-up notes on a lead (Phase 3C). User-scoped; only the lead's
+    owner can read/write. Free-form text, timestamped, append-only (no edit/
+    delete in MVP — keeps the audit trail simple)."""
+
+    __tablename__ = "lead_notes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    lead_id: Mapped[int] = mapped_column(ForeignKey("leads.id"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    body: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    lead: Mapped[Lead] = relationship(back_populates="notes")
 
 
 class Conversation(Base):

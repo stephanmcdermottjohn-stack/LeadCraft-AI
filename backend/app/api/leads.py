@@ -8,18 +8,21 @@ Compliance (roadmap Section 0):
   trusted). A honeypot field silently rejects bots.
 - There is no endpoint that initiates outbound-first contact.
 """
+import csv
 import datetime
+import io
 import json
 import re
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.auth import get_current_user
 from app.db import get_db
-from app.models import ClientSettings, Lead, User
+from app.models import ClientSettings, Lead, LeadNote, User
 
 router = APIRouter(prefix="/api/leads")
 
@@ -36,7 +39,10 @@ class LeadCaptureBody(BaseModel):
     email: str = Field(default="", max_length=320)
     area: str = Field(default="", max_length=200)
     intent_notes: str = Field(default="", max_length=2000)
-    # Property-module extras stored in metadata_json (Phase 3B).
+    # Property-module extras stored in metadata_json (Phase 3B). Only shown
+    # on the landing page when the business enables show_property_fields.
+    deal_type: str = Field(default="", max_length=20)   # buy / rent / sell
+    property_type: str = Field(default="", max_length=100)
     budget: str = Field(default="", max_length=100)
     # Honeypot: humans never fill this; bots do. 400 on non-empty.
     company: str = Field(default="", max_length=200)
@@ -46,6 +52,25 @@ class LeadCaptureBody(BaseModel):
 
 class LeadStatusBody(BaseModel):
     status: str
+
+
+class LeadNoteBody(BaseModel):
+    body: str = Field(min_length=1, max_length=2000)
+
+    @field_validator("body")
+    @classmethod
+    def _not_blank(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("note body must not be blank")
+        return v.strip()
+
+
+def _metadata(lead: Lead) -> dict:
+    try:
+        parsed = json.loads(lead.metadata_json or "{}")
+        return parsed if isinstance(parsed, dict) else {}
+    except ValueError:
+        return {}
 
 
 def _public_lead(lead: Lead) -> dict:
@@ -60,8 +85,16 @@ def _public_lead(lead: Lead) -> dict:
         "consent_timestamp": lead.consent_timestamp.isoformat() if lead.consent_timestamp else None,
         "score": lead.score,
         "status": lead.status,
-        "metadata": lead.metadata_json,
+        "metadata": _metadata(lead),
         "created_at": lead.created_at.isoformat() if lead.created_at else None,
+    }
+
+
+def _public_note(note: LeadNote) -> dict:
+    return {
+        "id": note.id,
+        "body": note.body,
+        "created_at": note.created_at.isoformat() if note.created_at else None,
     }
 
 
@@ -90,7 +123,17 @@ def capture(body: LeadCaptureBody, db: Session = Depends(get_db)) -> dict:
         consent_timestamp=datetime.datetime.now(datetime.timezone.utc),
         score=0,
         status="new",
-        metadata_json=json.dumps({"budget": body.budget} if body.budget else {}),
+        metadata_json=json.dumps(
+            {
+                k: v
+                for k, v in {
+                    "deal_type": body.deal_type.strip().lower(),
+                    "property_type": body.property_type.strip(),
+                    "budget": body.budget.strip(),
+                }.items()
+                if v
+            }
+        ),
         created_at=datetime.datetime.now(datetime.timezone.utc),
     )
     db.add(lead)
@@ -99,11 +142,92 @@ def capture(body: LeadCaptureBody, db: Session = Depends(get_db)) -> dict:
 
 
 @router.get("")
-def list_leads(user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
-    rows = db.scalars(
-        select(Lead).where(Lead.user_id == user.id).order_by(Lead.created_at.desc()).limit(200)
-    ).all()
+def list_leads(
+    q: str = "",
+    status: str = "",
+    source: str = "",
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    stmt = select(Lead).where(Lead.user_id == user.id)
+    if status:
+        if status not in LEAD_STATUSES:
+            raise HTTPException(status_code=400, detail=f"status must be one of: {sorted(LEAD_STATUSES)}")
+        stmt = stmt.where(Lead.status == status)
+    if source:
+        if source not in LEAD_SOURCES:
+            raise HTTPException(status_code=400, detail=f"source must be one of: {sorted(LEAD_SOURCES)}")
+        stmt = stmt.where(Lead.source == source)
+    if q.strip():
+        like = f"%{q.strip().lower()}%"
+        stmt = stmt.where(
+            Lead.name.ilike(like) | Lead.phone.ilike(like) | Lead.email.ilike(like)
+            | Lead.area.ilike(like) | Lead.intent_notes.ilike(like)
+        )
+    rows = db.scalars(stmt.order_by(Lead.created_at.desc()).limit(200)).all()
     return {"leads": [_public_lead(l) for l in rows]}
+
+
+@router.get("/export.csv")
+def export_leads_csv(user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> StreamingResponse:
+    rows = db.scalars(select(Lead).where(Lead.user_id == user.id).order_by(Lead.created_at.desc()).limit(5000)).all()
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(
+        ["id", "created_at", "source", "status", "name", "phone", "email", "area",
+         "deal_type", "property_type", "budget", "intent_notes", "consent_timestamp"]
+    )
+    for l in rows:
+        md = _metadata(l)
+        writer.writerow(
+            [l.id, l.created_at.isoformat() if l.created_at else "", l.source, l.status, l.name,
+             l.phone, l.email, l.area, md.get("deal_type", ""), md.get("property_type", ""),
+             md.get("budget", ""), l.intent_notes,
+             l.consent_timestamp.isoformat() if l.consent_timestamp else ""]
+        )
+    buffer.seek(0)
+    stamp = datetime.date.today().isoformat()
+    return StreamingResponse(
+        iter([buffer.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="leads-{stamp}.csv"'},
+    )
+
+
+@router.get("/{lead_id}/notes")
+def list_notes(
+    lead_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    lead = db.get(Lead, lead_id)
+    if lead is None or lead.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Lead not found.")
+    rows = db.scalars(
+        select(LeadNote).where(LeadNote.lead_id == lead_id).order_by(LeadNote.created_at.desc(), LeadNote.id.desc())
+    ).all()
+    return {"notes": [_public_note(n) for n in rows]}
+
+
+@router.post("/{lead_id}/notes", status_code=201)
+def add_note(
+    lead_id: int,
+    body: LeadNoteBody,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    lead = db.get(Lead, lead_id)
+    if lead is None or lead.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Lead not found.")
+    note = LeadNote(
+        lead_id=lead.id,
+        user_id=user.id,
+        body=body.body,
+        created_at=datetime.datetime.now(datetime.timezone.utc),
+    )
+    db.add(note)
+    db.commit()
+    return {"note": _public_note(note)}
 
 
 @router.patch("/{lead_id}/status")

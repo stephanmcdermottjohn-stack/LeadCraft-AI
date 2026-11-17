@@ -122,6 +122,7 @@ def test_public_landing_config_display_fields_only(client, owner_headers):
         "business_name": "Gulberg Salon",
         "niche": "bridal makeup",
         "target_area": "Gulberg Lahore",
+        "show_property_fields": False,
     }
     # No credentials, no other fields leak.
     assert "brand_voice" not in body
@@ -200,3 +201,92 @@ def test_slug_explicit_conflict_409_and_invalid_400(client, owner_headers):
     body = client.patch("/api/settings", json={"landing_slug": ""}, headers=headers)
     assert body.status_code == 200
     assert body.json()["settings"]["landing_slug"] is None
+
+
+# --- property module (Phase 3B) -----------------------------------------------
+
+def test_capture_stores_property_fields_in_metadata(client, owner_headers):
+    res = _capture(client, deal_type="Buy", property_type="5 Marla house", budget="2.5 crore")
+    assert res.status_code == 201, res.text
+    lead = client.get("/api/leads", headers=owner_headers).json()["leads"][0]
+    md = lead["metadata"]
+    assert md == {"deal_type": "buy", "property_type": "5 Marla house", "budget": "2.5 crore"}
+    # No property fields -> empty metadata (no junk keys).
+    res = _capture(client, name="Plain Visitor", email="plain@leadcrafttest.com", phone="")
+    lead2 = client.get("/api/leads", headers=owner_headers).json()["leads"][0]
+    assert lead2["metadata"] == {}
+
+
+def test_show_property_fields_toggle_roundtrip(client, owner_headers):
+    res = client.patch("/api/settings", json={"show_property_fields": True}, headers=owner_headers)
+    assert res.status_code == 200
+    assert res.json()["settings"]["show_property_fields"] is True
+    body = client.get("/api/public/landing/gulberg-salon").json()
+    assert body["show_property_fields"] is True
+    # Omitted keeps it on.
+    res = client.patch("/api/settings", json={}, headers=owner_headers)
+    assert res.json()["settings"]["show_property_fields"] is True
+
+
+# --- search / filter / export (Phase 3C) ---------------------------------------
+
+def test_leads_search_and_filters(client, owner_headers):
+    _capture(client, name="Ayesha Khan", area="Gulberg", intent_notes="bridal makeup")
+    _capture(client, name="Bilal Ahmed", area="Model Town", intent_notes="party makeup",
+             deal_type="buy", property_type="house", budget="2 crore")
+    _capture(client, name="Sana Malik", email="sana@leadcrafttest.com", phone="", intent_notes="salon booking")
+
+    by_name = client.get("/api/leads", params={"q": "bilal"}, headers=owner_headers).json()["leads"]
+    assert [l["name"] for l in by_name] == ["Bilal Ahmed"]
+    by_notes = client.get("/api/leads", params={"q": "bridal"}, headers=owner_headers).json()["leads"]
+    assert len(by_notes) == 1
+    assert client.get("/api/leads", params={"status": "new"}, headers=owner_headers).json()["leads"].__len__() == 3
+    client.patch("/api/leads/1/status", json={"status": "contacted"}, headers=owner_headers)
+    filtered = client.get("/api/leads", params={"status": "contacted"}, headers=owner_headers).json()["leads"]
+    assert len(filtered) == 1
+    assert client.get("/api/leads", params={"status": "bogus"}, headers=owner_headers).status_code == 400
+    assert client.get("/api/leads", params={"source": "bogus"}, headers=owner_headers).status_code == 400
+
+
+def test_leads_csv_export(client, owner_headers):
+    _capture(client, deal_type="rent", budget="1 lakh")
+    res = client.get("/api/leads/export.csv", headers=owner_headers)
+    assert res.status_code == 200
+    assert "text/csv" in res.headers["content-type"]
+    text = res.text
+    assert "id,created_at,source,status,name,phone,email,area" in text
+    assert "Ayesha Khan" in text
+    assert "rent" in text
+    # Another user gets only their (empty) export.
+    other = client.post(
+        "/api/auth/register",
+        json={"business_name": "Other", "email": "csvother@leadcrafttest.com", "password": "supersecret1"},
+    )
+    res2 = client.get("/api/leads/export.csv", headers={"Authorization": f"Bearer {other.json()['token']}"})
+    assert "Ayesha Khan" not in res2.text
+
+
+# --- lead notes (Phase 3C) ------------------------------------------------------
+
+def test_lead_notes_add_list_and_isolation(client, owner_headers):
+    _capture(client)
+    lead = client.get("/api/leads", headers=owner_headers).json()["leads"][0]
+    res = client.post(f"/api/leads/{lead['id']}/notes", json={"body": "Called, wants December slot."}, headers=owner_headers)
+    assert res.status_code == 201
+    res = client.post(f"/api/leads/{lead['id']}/notes", json={"body": "Sent WhatsApp catalogue."}, headers=owner_headers)
+    assert res.status_code == 201
+    notes = client.get(f"/api/leads/{lead['id']}/notes", headers=owner_headers).json()["notes"]
+    assert len(notes) == 2
+    assert notes[0]["body"] == "Sent WhatsApp catalogue."  # newest first
+
+    # Empty note rejected.
+    assert client.post(f"/api/leads/{lead['id']}/notes", json={"body": "  "}, headers=owner_headers).status_code == 422
+
+    # Another user cannot read or write this lead's notes.
+    other = client.post(
+        "/api/auth/register",
+        json={"business_name": "Other", "email": "noteother@leadcrafttest.com", "password": "supersecret1"},
+    )
+    oh = {"Authorization": f"Bearer {other.json()['token']}"}
+    assert client.get(f"/api/leads/{lead['id']}/notes", headers=oh).status_code == 404
+    assert client.post(f"/api/leads/{lead['id']}/notes", json={"body": "hijack"}, headers=oh).status_code == 404
