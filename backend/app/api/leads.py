@@ -22,8 +22,9 @@ from sqlalchemy.orm import Session
 
 from app.api.auth import get_current_user
 from app.db import get_db
-from app.models import ClientSettings, Lead, LeadNote, User
+from app.models import ClientSettings, Lead, LeadNote, LeadStageHistory, User
 from app.services.business_types import EXTRA_VALUE_MAX, extras_for
+from app.services.lifecycle import default_next_action, is_valid_stage
 
 router = APIRouter(prefix="/api/leads")
 
@@ -49,6 +50,14 @@ class LeadCaptureBody(BaseModel):
     # Generic template extras: {field_key: value}. Keys are validated against
     # the business's enabled template server-side.
     extra: dict[str, str] | None = None
+    # Source attribution (roadmap P0). URL params passed through by the
+    # landing page; length-capped + plain strings only, never trusted clocks.
+    campaign: str = Field(default="", max_length=200)
+    utm_source: str = Field(default="", max_length=200)
+    utm_medium: str = Field(default="", max_length=200)
+    utm_content: str = Field(default="", max_length=200)
+    utm_term: str = Field(default="", max_length=200)
+    landing_variant: str = Field(default="", max_length=50)
     # Honeypot: humans never fill this; bots do. 400 on non-empty.
     company: str = Field(default="", max_length=200)
     # Explicit consent checkbox on the form. Required.
@@ -74,6 +83,16 @@ class LeadImportBody(BaseModel):
 
 class LeadStatusBody(BaseModel):
     status: str
+
+
+class LeadStageBody(BaseModel):
+    """Lifecycle stage change + planning fields (roadmap P0). Omitted fields
+    keep their current values; stage is required."""
+    stage: str
+    note: str = Field(default="", max_length=500)
+    next_action: str | None = Field(default=None, max_length=500)
+    next_action_at: datetime.datetime | None = None
+    assigned_to: str | None = Field(default=None, max_length=200)
 
 
 class LeadNoteBody(BaseModel):
@@ -107,6 +126,17 @@ def _public_lead(lead: Lead) -> dict:
         "consent_timestamp": lead.consent_timestamp.isoformat() if lead.consent_timestamp else None,
         "score": lead.score,
         "status": lead.status,
+        "lifecycle_stage": lead.lifecycle_stage,
+        "grade": lead.grade,
+        "assigned_to": lead.assigned_to,
+        "next_action": lead.next_action,
+        "next_action_at": lead.next_action_at.isoformat() if lead.next_action_at else None,
+        "campaign": lead.campaign,
+        "utm_source": lead.utm_source,
+        "utm_medium": lead.utm_medium,
+        "utm_content": lead.utm_content,
+        "utm_term": lead.utm_term,
+        "landing_variant": lead.landing_variant,
         "metadata": _metadata(lead),
         "created_at": lead.created_at.isoformat() if lead.created_at else None,
     }
@@ -160,10 +190,29 @@ def capture(body: LeadCaptureBody, db: Session = Depends(get_db)) -> dict:
         consent_timestamp=datetime.datetime.now(datetime.timezone.utc),
         score=0,
         status="new",
+        lifecycle_stage="capture",
+        # Attribution: plain strings from the landing URL; empty = unknown.
+        campaign=body.campaign.strip(),
+        utm_source=body.utm_source.strip(),
+        utm_medium=body.utm_medium.strip(),
+        utm_content=body.utm_content.strip(),
+        utm_term=body.utm_term.strip(),
+        landing_variant=body.landing_variant.strip(),
+        next_action=default_next_action("capture"),
         metadata_json=json.dumps(metadata),
         created_at=datetime.datetime.now(datetime.timezone.utc),
     )
     db.add(lead)
+    db.flush()
+    db.add(
+        LeadStageHistory(
+            lead_id=lead.id,
+            user_id=settings_row.user_id,
+            from_stage="",
+            to_stage="capture",
+            note="captured via landing page",
+        )
+    )
     db.commit()
     return {"lead": {"id": lead.id, "status": lead.status}}
 
@@ -322,5 +371,89 @@ def update_status(
     if lead is None or lead.user_id != user.id:
         raise HTTPException(status_code=404, detail="Lead not found.")
     lead.status = body.status
+    # Lifecycle bridge: a won/converted CRM status advances the lifecycle to
+    # the convert stage (logged). Other statuses don't touch the stage —
+    # the two concepts stay independent.
+    if body.status == "converted" and lead.lifecycle_stage != "convert":
+        db.add(
+            LeadStageHistory(
+                lead_id=lead.id,
+                user_id=user.id,
+                from_stage=lead.lifecycle_stage,
+                to_stage="convert",
+                note="auto: status set to converted",
+            )
+        )
+        lead.lifecycle_stage = "convert"
+        if not lead.next_action:
+            lead.next_action = default_next_action("convert")
     db.commit()
     return {"lead": _public_lead(lead)}
+
+
+@router.patch("/{lead_id}/stage")
+def update_stage(
+    lead_id: int,
+    body: LeadStageBody,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    if not is_valid_stage(body.stage):
+        raise HTTPException(status_code=400, detail="stage must be one of: capture, qualify, nurture, convert, retain, reactivate")
+    lead = db.get(Lead, lead_id)
+    if lead is None or lead.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Lead not found.")
+
+    previous = lead.lifecycle_stage
+    if body.stage != previous:
+        lead.lifecycle_stage = body.stage
+        db.add(
+            LeadStageHistory(
+                lead_id=lead.id,
+                user_id=user.id,
+                from_stage=previous,
+                to_stage=body.stage,
+                note=body.note,
+            )
+        )
+        # Suggest (never overwrite an owner-set action) the stage's default.
+        if not lead.next_action:
+            lead.next_action = default_next_action(body.stage)
+
+    # Optional planning fields: omitted = keep existing.
+    if body.next_action is not None:
+        lead.next_action = body.next_action.strip()
+    if body.assigned_to is not None:
+        lead.assigned_to = body.assigned_to.strip()
+    if "next_action_at" in body.model_fields_set:
+        lead.next_action_at = body.next_action_at
+
+    db.commit()
+    return {"lead": _public_lead(lead)}
+
+
+@router.get("/{lead_id}/stage-history")
+def stage_history(
+    lead_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    lead = db.get(Lead, lead_id)
+    if lead is None or lead.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Lead not found.")
+    rows = db.scalars(
+        select(LeadStageHistory)
+        .where(LeadStageHistory.lead_id == lead_id)
+        .order_by(LeadStageHistory.changed_at.desc(), LeadStageHistory.id.desc())
+    ).all()
+    return {
+        "history": [
+            {
+                "from_stage": h.from_stage,
+                "to_stage": h.to_stage,
+                "note": h.note,
+                "changed_at": h.changed_at.isoformat() if h.changed_at else None,
+            }
+            for h in rows
+        ]
+    }

@@ -397,6 +397,19 @@ function LandingPage({ slug }) {
   const [error, setError] = useState("");
   // Honeypot: hidden field humans never fill. Never label it as a honeypot.
   const [company, setCompany] = useState("");
+  // Attribution: UTM/campaign params from the share link (roadmap P0).
+  const attribution = (() => {
+    const p = new URLSearchParams(window.location.search);
+    const get = (k) => (p.get(k) || "").slice(0, 200);
+    return {
+      campaign: get("campaign") || get("utm_campaign"),
+      utm_source: get("utm_source"),
+      utm_medium: get("utm_medium"),
+      utm_content: get("utm_content"),
+      utm_term: get("utm_term"),
+      landing_variant: (p.get("v") || "").slice(0, 50),
+    };
+  })();
 
   useEffect(() => {
     api(`/api/public/landing/${encodeURIComponent(slug)}`)
@@ -419,6 +432,7 @@ function LandingPage({ slug }) {
           area: form.area,
           intent_notes: form.intent_notes,
           extra: config.extra_fields?.length ? extra : {},
+          ...attribution,
           company,
           consent,
         }),
@@ -575,6 +589,7 @@ function LeadsPanel() {
   const [importMsg, setImportMsg] = useState("");
   const STATUSES = ["new", "contacted", "converted", "archived"];
   const SOURCES = ["landing_page", "meta_lead_ad", "google_lead_form", "whatsapp_inbound", "direct_message"];
+  const LIFECYCLE_STAGES = ["capture", "qualify", "nurture", "convert", "retain", "reactivate"];
 
   const loadLeads = (params = {}) => {
     const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v));
@@ -600,6 +615,15 @@ function LeadsPanel() {
       setLeads((rows) => rows.map((l) => (l.id === id ? b.lead : l)));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Update failed.");
+    }
+  };
+
+  const setStage = async (id, stage) => {
+    try {
+      const b = await api(`/api/leads/${id}/stage`, { method: "PATCH", body: JSON.stringify({ stage }) });
+      setLeads((rows) => rows.map((l) => (l.id === id ? b.lead : l)));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Stage update failed.");
     }
   };
 
@@ -789,6 +813,17 @@ function LeadsPanel() {
               <div className="flex flex-wrap items-center gap-2">
                 <span className="rounded bg-sky-900 px-2 py-0.5 text-xs">{l.source}</span>
                 <span className="rounded bg-slate-800 px-2 py-0.5 text-xs">{l.status}</span>
+                <select
+                  className="rounded bg-indigo-900 px-2 py-1 text-xs"
+                  value={l.lifecycle_stage}
+                  onChange={(e) => setStage(l.id, e.target.value)}
+                  title="Lifecycle stage"
+                >
+                  {LIFECYCLE_STAGES.map((s) => (
+                    <option key={s}>{s}</option>
+                  ))}
+                </select>
+                {l.grade && <span className="rounded bg-emerald-900 px-2 py-0.5 text-xs">Grade {l.grade}</span>}
                 <span className="text-xs text-slate-500">
                   consent: {l.consent_timestamp ? new Date(l.consent_timestamp).toLocaleString() : "—"}
                 </span>
@@ -811,6 +846,18 @@ function LeadsPanel() {
               </p>
               {mdLine(l.metadata) && (
                 <p className="mt-1 text-xs text-sky-300">🏠 {mdLine(l.metadata)}</p>
+              )}
+              {(l.campaign || l.utm_source) && (
+                <p className="mt-1 text-xs text-violet-300">
+                  📣 {[l.campaign, l.utm_source, l.utm_medium].filter(Boolean).join(" / ")}
+                  {l.landing_variant ? ` · variant ${l.landing_variant}` : ""}
+                </p>
+              )}
+              {l.next_action && (
+                <p className="mt-1 text-xs text-amber-300">
+                  ▶ {l.next_action}
+                  {l.next_action_at ? ` (by ${new Date(l.next_action_at).toLocaleDateString()})` : ""}
+                </p>
               )}
               {l.intent_notes && <p className="mt-1 text-slate-400 whitespace-pre-wrap">{l.intent_notes}</p>}
               <button className="mt-2 text-xs text-slate-400 hover:text-slate-200" onClick={() => toggleNotes(l.id)}>

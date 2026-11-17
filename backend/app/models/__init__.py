@@ -94,11 +94,45 @@ class Lead(Base):
     status: Mapped[str] = mapped_column(String(50), default="new")
     # Property-module extension fields (budget, buy/rent/sell, type...).
     metadata_json: Mapped[str] = mapped_column(Text, default="{}")
+    # --- Phase L (lifecycle engine) -------------------------------------------
+    # Sales-funnel lifecycle, separate from the CRM `status` enum above so
+    # existing reporting keeps working. Standard stages: capture -> qualify ->
+    # nurture -> convert -> retain -> reactivate.
+    lifecycle_stage: Mapped[str] = mapped_column(String(30), default="capture")
+    grade: Mapped[str] = mapped_column(String(2), default="")  # A-D ICP fit (set by the scoring module)
+    assigned_to: Mapped[str] = mapped_column(String(200), default="")
+    next_action: Mapped[str] = mapped_column(String(500), default="")
+    next_action_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # --- Source attribution (roadmap P0 #7) ------------------------------------
+    campaign: Mapped[str] = mapped_column(String(200), default="")
+    utm_source: Mapped[str] = mapped_column(String(200), default="")
+    utm_medium: Mapped[str] = mapped_column(String(200), default="")
+    utm_content: Mapped[str] = mapped_column(String(200), default="")
+    utm_term: Mapped[str] = mapped_column(String(200), default="")
+    landing_variant: Mapped[str] = mapped_column(String(50), default="")
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     user: Mapped[User] = relationship(back_populates="leads")
     conversations: Mapped[list["Conversation"]] = relationship(back_populates="lead")
     notes: Mapped[list["LeadNote"]] = relationship(back_populates="lead")
+    stage_history: Mapped[list["LeadStageHistory"]] = relationship(back_populates="lead")
+
+
+class LeadStageHistory(Base):
+    """Append-only lifecycle stage log (Phase L). Historical rows are never
+    rewritten — later ICP/score changes must not corrupt this record."""
+
+    __tablename__ = "lead_stage_history"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    lead_id: Mapped[int] = mapped_column(ForeignKey("leads.id"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    from_stage: Mapped[str] = mapped_column(String(30))
+    to_stage: Mapped[str] = mapped_column(String(30))
+    note: Mapped[str] = mapped_column(String(500), default="")
+    changed_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    lead: Mapped[Lead] = relationship(back_populates="stage_history")
 
 
 class LeadNote(Base):
