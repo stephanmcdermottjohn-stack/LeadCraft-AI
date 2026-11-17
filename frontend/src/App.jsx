@@ -243,6 +243,217 @@ function ContentPanel() {
   );
 }
 
+function IcpEditor() {
+  const [profiles, setProfiles] = useState([]);
+  const [templates, setTemplates] = useState([]);
+  const [editing, setEditing] = useState(null); // null = list, {} = new, profile = edit
+  const [msg, setMsg] = useState("");
+  const [error, setError] = useState("");
+
+  const loadProfiles = () =>
+    api("/api/icp").then((b) => setProfiles(b.profiles)).catch((err) => setError(err.message));
+  useEffect(() => {
+    loadProfiles();
+    api("/api/icp/templates").then((b) => setTemplates(b.templates)).catch(() => {});
+  }, []);
+
+  const blank = { name: "", industry: "", company_size: "", location: "", budget_min: "", budget_max: "", business_type: "", needs: "", preferred_services: "", decision_authority: "", buying_timeline: "", criteria: "", is_default: false };
+
+  const openNew = (template) => {
+    const prefill = template ? { ...template } : { ...blank };
+    const crit = Array.isArray(prefill.criteria) ? prefill.criteria.join(", ") : (prefill.criteria ?? "");
+    setEditing({
+      ...blank, ...prefill, id: template?.id,
+      criteria: crit,
+      budget_min: prefill.budget_min ?? "",
+      budget_max: prefill.budget_max ?? "",
+      label: undefined, key: undefined,
+    });
+  };
+
+  const save = async () => {
+    setError(""); setMsg("");
+    try {
+      const payload = {
+        name: editing.name,
+        industry: editing.industry,
+        company_size: editing.company_size,
+        location: editing.location,
+        budget_min: editing.budget_min === "" ? null : Number(editing.budget_min),
+        budget_max: editing.budget_max === "" ? null : Number(editing.budget_max),
+        business_type: editing.business_type,
+        needs: editing.needs,
+        preferred_services: editing.preferred_services,
+        decision_authority: editing.decision_authority,
+        buying_timeline: editing.buying_timeline,
+        criteria: editing.criteria.split(",").map((c) => c.trim()).filter(Boolean),
+        is_default: editing.is_default,
+      };
+      const res = editing.id
+        ? await api(`/api/icp/${editing.id}`, { method: "PATCH", body: JSON.stringify(payload) })
+        : await api("/api/icp", { method: "POST", body: JSON.stringify(payload) });
+      setMsg(`Saved "${res.profile.name}".`);
+      setEditing(null);
+      loadProfiles();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Save failed.");
+    }
+  };
+
+  const remove = async (id) => {
+    try {
+      await api(`/api/icp/${id}`, { method: "DELETE" });
+      loadProfiles();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Delete failed.");
+    }
+  };
+
+  const setDefault = async (p) => {
+    try {
+      await api(`/api/icp/${p.id}`, { method: "PATCH", body: JSON.stringify({ ...p, criteria: p.criteria }) });
+      loadProfiles();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Update failed.");
+    }
+  };
+
+  const numField = (key, label) => (
+    <label className="block text-sm">
+      {label}
+      <input
+        type="number"
+        className="mt-1 w-full rounded-lg bg-slate-800 px-3 py-2"
+        placeholder="PKR (blank = no bound)"
+        value={editing[key]}
+        onChange={(e) => setEditing({ ...editing, [key]: e.target.value })}
+      />
+    </label>
+  );
+
+  if (editing) {
+    return (
+      <div className="rounded-xl border border-slate-800 bg-slate-900 p-6 space-y-3 max-w-lg">
+        <h3 className="font-semibold">{editing.id ? "Edit ICP" : "New Ideal Customer Profile"}</h3>
+        <label className="block text-sm">Profile name
+          <input className="mt-1 w-full rounded-lg bg-slate-800 px-3 py-2" value={editing.name}
+                 onChange={(e) => setEditing({ ...editing, name: e.target.value })} />
+        </label>
+        <div className="grid grid-cols-2 gap-3">
+          <label className="block text-sm">Industry
+            <input className="mt-1 w-full rounded-lg bg-slate-800 px-3 py-2" value={editing.industry}
+                   onChange={(e) => setEditing({ ...editing, industry: e.target.value })} />
+          </label>
+          <label className="block text-sm">Location
+            <input className="mt-1 w-full rounded-lg bg-slate-800 px-3 py-2" placeholder="e.g. Gulberg, DHA"
+                   value={editing.location} onChange={(e) => setEditing({ ...editing, location: e.target.value })} />
+          </label>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          {numField("budget_min", "Budget minimum")}
+          {numField("budget_max", "Budget maximum")}
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <label className="block text-sm">Business type
+            <select className="mt-1 w-full rounded-lg bg-slate-800 px-3 py-2" value={editing.business_type}
+                    onChange={(e) => setEditing({ ...editing, business_type: e.target.value })}>
+              {BUSINESS_TYPES.map((t) => (<option key={t.value} value={t.value}>{t.label}</option>))}
+            </select>
+          </label>
+          <label className="block text-sm">Company size
+            <input className="mt-1 w-full rounded-lg bg-slate-800 px-3 py-2" placeholder="e.g. 10-50 staff"
+                   value={editing.company_size} onChange={(e) => setEditing({ ...editing, company_size: e.target.value })} />
+          </label>
+        </div>
+        <label className="block text-sm">Customer needs (keywords)
+          <input className="mt-1 w-full rounded-lg bg-slate-800 px-3 py-2" placeholder="e.g. bridal makeup package"
+                 value={editing.needs} onChange={(e) => setEditing({ ...editing, needs: e.target.value })} />
+        </label>
+        <label className="block text-sm">Preferred services (keywords)
+          <input className="mt-1 w-full rounded-lg bg-slate-800 px-3 py-2" placeholder="e.g. trial session, consultation"
+                 value={editing.preferred_services} onChange={(e) => setEditing({ ...editing, preferred_services: e.target.value })} />
+        </label>
+        <div className="grid grid-cols-2 gap-3">
+          <label className="block text-sm">Decision authority
+            <input className="mt-1 w-full rounded-lg bg-slate-800 px-3 py-2" placeholder="e.g. owner, parent"
+                   value={editing.decision_authority} onChange={(e) => setEditing({ ...editing, decision_authority: e.target.value })} />
+          </label>
+          <label className="block text-sm">Buying timeline
+            <input className="mt-1 w-full rounded-lg bg-slate-800 px-3 py-2" placeholder="e.g. within 1 month"
+                   value={editing.buying_timeline} onChange={(e) => setEditing({ ...editing, buying_timeline: e.target.value })} />
+          </label>
+        </div>
+        <label className="block text-sm">Custom criteria (comma separated)
+          <input className="mt-1 w-full rounded-lg bg-slate-800 px-3 py-2" placeholder="e.g. repeat buyer, local resident"
+                 value={editing.criteria} onChange={(e) => setEditing({ ...editing, criteria: e.target.value })} />
+        </label>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={editing.is_default}
+                 onChange={(e) => setEditing({ ...editing, is_default: e.target.checked })} />
+          Use as the default profile for lead fit checks
+        </label>
+        {error && <p className="text-xs text-red-400">{error}</p>}
+        <div className="flex gap-2">
+          <button className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold hover:bg-sky-500" onClick={save}>Save</button>
+          <button className="rounded-lg bg-slate-800 px-4 py-2 text-sm hover:bg-slate-700" onClick={() => setEditing(null)}>Cancel</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border border-slate-800 bg-slate-900 p-6 space-y-4 max-w-lg">
+      <h3 className="font-semibold">Ideal Customer Profile (ICP)</h3>
+      <p className="text-xs text-slate-400">
+        Describe your ideal customer — leads are then graded (A-D) against it with a transparent, factor-by-factor explanation.
+      </p>
+      {error && <p className="text-xs text-red-400">{error}</p>}
+      {msg && <p className="text-xs text-emerald-400">{msg}</p>}
+      <ul className="space-y-2">
+        {profiles.map((p) => (
+          <li key={p.id} className="rounded-lg border border-slate-800 bg-slate-950 p-3 text-sm">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-semibold">{p.name}</span>
+              {p.is_default && <span className="rounded bg-emerald-900 px-2 py-0.5 text-xs">default</span>}
+              {p.industry && <span className="text-xs text-slate-400">{p.industry}</span>}
+              <div className="ml-auto flex gap-2">
+                {!p.is_default && (
+                  <button className="text-xs text-slate-400 hover:text-slate-200" onClick={() => setDefault(p)}>Set default</button>
+                )}
+                <button className="text-xs text-sky-400 hover:text-sky-300" onClick={() => openNew({ ...p, id: p.id })}>Edit</button>
+                <button className="text-xs text-red-400 hover:text-red-300" onClick={() => remove(p.id)}>Delete</button>
+              </div>
+            </div>
+            {(p.needs || p.location) && (
+              <p className="text-xs text-slate-500 mt-1">
+                {[p.location && `📍 ${p.location}`, p.needs && `🎯 ${p.needs}`, p.buying_timeline && `⏱ ${p.buying_timeline}`].filter(Boolean).join(" · ")}
+              </p>
+            )}
+          </li>
+        ))}
+        {profiles.length === 0 && (
+          <li className="text-sm text-slate-400">No ICP profiles yet — start from a template or create your own.</li>
+        )}
+      </ul>
+      <div className="flex flex-wrap gap-2 items-center">
+        <button className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold hover:bg-sky-500" onClick={() => openNew(null)}>
+          + New ICP
+        </button>
+        <select
+          className="rounded-lg bg-slate-800 px-3 py-2 text-sm"
+          value=""
+          onChange={(e) => e.target.value && openNew(templates.find((t) => t.key === e.target.value))}
+        >
+          <option value="">Start from template…</option>
+          {templates.map((t) => (
+            <option key={t.key} value={t.key}>{t.label}</option>
+          ))}
+        </select>
+      </div>
+    </div>
+  );
+}
+
 function SettingsPanel({ user, onLogout }) {
   const [settings, setSettings] = useState({ niche: "", target_area: "", brand_voice: "", landing_slug: null, show_property_fields: false, business_type: "" });
   const [slugInput, setSlugInput] = useState("");
@@ -380,6 +591,7 @@ function SettingsPanel({ user, onLogout }) {
         {saved && <span className="text-xs text-emerald-400"> Saved ✓</span>}
         <p className="text-xs text-slate-500">These power the AI content prompts — personalized per business, not generic.</p>
       </div>
+      <IcpEditor />
       <button className="text-sm text-red-400 hover:text-red-300" onClick={onLogout}>
         Log out
       </button>
@@ -587,6 +799,8 @@ function LeadsPanel() {
   const [importSource, setImportSource] = useState("meta_lead_ad");
   const [importConsent, setImportConsent] = useState(false);
   const [importMsg, setImportMsg] = useState("");
+  const [defaultIcpId, setDefaultIcpId] = useState(null);
+  const [fits, setFits] = useState({});
   const STATUSES = ["new", "contacted", "converted", "archived"];
   const SOURCES = ["landing_page", "meta_lead_ad", "google_lead_form", "whatsapp_inbound", "direct_message"];
   const LIFECYCLE_STAGES = ["capture", "qualify", "nurture", "convert", "retain", "reactivate"];
@@ -601,6 +815,16 @@ function LeadsPanel() {
 
   useEffect(() => {
     loadLeads();
+  }, []);
+
+  // Default ICP for one-click fit checks (silently absent if none exists).
+  useEffect(() => {
+    api("/api/icp")
+      .then((b) => {
+        const def = b.profiles.find((p) => p.is_default) ?? b.profiles[0];
+        if (def) setDefaultIcpId(def.id);
+      })
+      .catch(() => {});
   }, []);
 
   // Debounced re-fetch on filter changes
@@ -668,6 +892,18 @@ function LeadsPanel() {
       setNoteDraft("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Note failed.");
+    }
+  };
+
+  // ICP fit check: uses the default profile (or the first one). Transparent:
+  // shows the grade, the score basis, and every factor's explanation.
+  const runFit = async (id) => {
+    setError("");
+    try {
+      const b = await api(`/api/icp/${defaultIcpId}/match/${id}`, { method: "POST" });
+      setFits((f) => ({ ...f, [id]: b.fit }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Fit check failed.");
     }
   };
 
@@ -858,6 +1094,33 @@ function LeadsPanel() {
                   ▶ {l.next_action}
                   {l.next_action_at ? ` (by ${new Date(l.next_action_at).toLocaleDateString()})` : ""}
                 </p>
+              )}
+              {defaultIcpId && (
+                <div className="mt-2">
+                  <button className="text-xs text-emerald-400 hover:text-emerald-300" onClick={() => runFit(l.id)}>
+                    {fits[l.id] ? "Re-check ICP fit" : "Check ICP fit"}
+                  </button>
+                  {fits[l.id] && (
+                    <div className="mt-1 rounded border border-slate-800 bg-slate-900 p-2 text-xs">
+                      <p className="font-semibold">
+                        {fits[l.id].grade
+                          ? <>Grade {fits[l.id].grade} · fit {fits[l.id].score}% <span className="text-slate-500 font-normal">(heuristic — not a calibrated probability)</span></>
+                          : "Not enough information to grade"}
+                      </p>
+                      <ul className="mt-1 space-y-0.5 text-slate-400">
+                        {fits[l.id].factors.map((f) => (
+                          <li key={f.factor}>
+                            <span className={
+                              f.status === "match" ? "text-emerald-400" :
+                              f.status === "partial" ? "text-amber-400" :
+                              f.status === "no_match" ? "text-red-400" : "text-slate-500"
+                            }>{f.status}</span> {f.factor}: {f.detail}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
               )}
               {l.intent_notes && <p className="mt-1 text-slate-400 whitespace-pre-wrap">{l.intent_notes}</p>}
               <button className="mt-2 text-xs text-slate-400 hover:text-slate-200" onClick={() => toggleNotes(l.id)}>

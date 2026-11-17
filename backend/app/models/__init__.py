@@ -135,6 +135,36 @@ class LeadStageHistory(Base):
     lead: Mapped[Lead] = relationship(back_populates="stage_history")
 
 
+class IcpProfile(Base):
+    """Ideal Customer Profile (roadmap P0 #2). User-scoped; describes the
+    customer the business wants. Lead fit is computed on demand against this
+    profile — profiles may be edited or deleted freely without ever rewriting
+    historical fit records (those snapshot into lead_score_history later)."""
+
+    __tablename__ = "icp_profiles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    name: Mapped[str] = mapped_column(String(100))
+    industry: Mapped[str] = mapped_column(String(100), default="")
+    company_size: Mapped[str] = mapped_column(String(50), default="")
+    location: Mapped[str] = mapped_column(String(200), default="")
+    # Budget range in PKR raw numbers (UI states the unit). Both nullable:
+    # an unset bound simply doesn't constrain the match.
+    budget_min: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    budget_max: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Mirrors the business template key where relevant ("", property, ...).
+    business_type: Mapped[str] = mapped_column(String(50), default="")
+    needs: Mapped[str] = mapped_column(String(1000), default="")
+    preferred_services: Mapped[str] = mapped_column(String(1000), default="")
+    decision_authority: Mapped[str] = mapped_column(String(200), default="")
+    buying_timeline: Mapped[str] = mapped_column(String(200), default="")
+    # Free-form custom criteria, JSON array of short strings.
+    criteria_json: Mapped[str] = mapped_column(Text, default="[]")
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class LeadNote(Base):
     """CRM follow-up notes on a lead (Phase 3C). User-scoped; only the lead's
     owner can read/write. Free-form text, timestamped, append-only (no edit/
