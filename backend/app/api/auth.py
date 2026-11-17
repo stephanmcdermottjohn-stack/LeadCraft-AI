@@ -32,6 +32,7 @@ def _public_user(user: User) -> dict:
         "business_name": user.business_name,
         "email": user.email,
         "plan_tier": user.plan_tier,
+        "is_admin": bool(user.is_admin),
         "created_at": user.created_at.isoformat() if user.created_at else None,
     }
 
@@ -46,6 +47,12 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
     user = db.get(User, uid)
     if user is None:
         raise HTTPException(status_code=401, detail="User no longer exists.")
+    return user
+
+
+def require_admin(user: User = Depends(get_current_user)) -> User:
+    if not user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin access required.")
     return user
 
 

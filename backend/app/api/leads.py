@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 from app.api.auth import get_current_user
 from app.db import get_db
 from app.models import ClientSettings, Lead, LeadNote, User
+from app.services.business_types import EXTRA_VALUE_MAX, extras_for
 
 router = APIRouter(prefix="/api/leads")
 
@@ -39,15 +40,36 @@ class LeadCaptureBody(BaseModel):
     email: str = Field(default="", max_length=320)
     area: str = Field(default="", max_length=200)
     intent_notes: str = Field(default="", max_length=2000)
-    # Property-module extras stored in metadata_json (Phase 3B). Only shown
-    # on the landing page when the business enables show_property_fields.
+    # Legacy Phase 3B property fields — still accepted so older clients and
+    # integrations keep working; the generic `extra` dict covers every
+    # business template now.
     deal_type: str = Field(default="", max_length=20)   # buy / rent / sell
     property_type: str = Field(default="", max_length=100)
     budget: str = Field(default="", max_length=100)
+    # Generic template extras: {field_key: value}. Keys are validated against
+    # the business's enabled template server-side.
+    extra: dict[str, str] | None = None
     # Honeypot: humans never fill this; bots do. 400 on non-empty.
     company: str = Field(default="", max_length=200)
     # Explicit consent checkbox on the form. Required.
     consent: bool
+
+
+class LeadImportRow(BaseModel):
+    name: str = Field(default="", max_length=200)
+    phone: str = Field(default="", max_length=50)
+    email: str = Field(default="", max_length=320)
+    area: str = Field(default="", max_length=200)
+    notes: str = Field(default="", max_length=2000)
+
+
+class LeadImportBody(BaseModel):
+    # Manual import of a platform lead export (Meta Lead Ads CSV / Google
+    # lead form CSV) while the automated webhook is pending. The leads
+    # consented on that platform; the importer attests to it.
+    source: str
+    consent: bool
+    rows: list[LeadImportRow]
 
 
 class LeadStatusBody(BaseModel):
@@ -112,6 +134,21 @@ def capture(body: LeadCaptureBody, db: Session = Depends(get_db)) -> dict:
     if settings_row is None:
         raise HTTPException(status_code=404, detail="Unknown business page.")
 
+    # Template extras: whitelist keys against the business's enabled template.
+    # Legacy top-level property fields map into the same metadata dict.
+    allowed_keys = {e["key"] for e in extras_for(settings_row.business_type or "")} if settings_row.show_property_fields else set()
+    metadata: dict[str, str] = {}
+    for k, v in {
+        "deal_type": body.deal_type,
+        "property_type": body.property_type,
+        "budget": body.budget,
+    }.items():
+        if v and v.strip():
+            metadata[k] = v.strip().lower() if k == "deal_type" else v.strip()
+    for k, v in (body.extra or {}).items():
+        if settings_row.show_property_fields and k in allowed_keys and str(v).strip():
+            metadata[k] = str(v).strip()[:EXTRA_VALUE_MAX]
+
     lead = Lead(
         user_id=settings_row.user_id,
         source="landing_page",
@@ -123,22 +160,64 @@ def capture(body: LeadCaptureBody, db: Session = Depends(get_db)) -> dict:
         consent_timestamp=datetime.datetime.now(datetime.timezone.utc),
         score=0,
         status="new",
-        metadata_json=json.dumps(
-            {
-                k: v
-                for k, v in {
-                    "deal_type": body.deal_type.strip().lower(),
-                    "property_type": body.property_type.strip(),
-                    "budget": body.budget.strip(),
-                }.items()
-                if v
-            }
-        ),
+        metadata_json=json.dumps(metadata),
         created_at=datetime.datetime.now(datetime.timezone.utc),
     )
     db.add(lead)
     db.commit()
     return {"lead": {"id": lead.id, "status": lead.status}}
+
+
+@router.post("/import", status_code=201)
+def import_leads(
+    body: LeadImportBody,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    # Manual platform-export import (Meta Lead Ads / Google lead form CSV).
+    # The leads already consented on that platform; the importer attests via
+    # the consent flag, and consent_timestamp is stamped server-side.
+    if body.source not in {"meta_lead_ad", "google_lead_form"}:
+        raise HTTPException(
+            status_code=400,
+            detail="source must be meta_lead_ad or google_lead_form (platform exports).",
+        )
+    if not body.consent:
+        raise HTTPException(status_code=400, detail="Confirm that the imported leads consented on the source platform.")
+    if not body.rows:
+        raise HTTPException(status_code=400, detail="No rows to import.")
+    if len(body.rows) > 500:
+        raise HTTPException(status_code=400, detail="Import at most 500 rows at a time.")
+
+    now = datetime.datetime.now(datetime.timezone.utc)
+    created = skipped = 0
+    for row in body.rows:
+        name = row.name.strip()
+        phone = row.phone.strip()
+        email = row.email.strip().lower()
+        if not name or (not phone and not email):
+            # Skip malformed rows instead of failing the whole batch.
+            skipped += 1
+            continue
+        db.add(
+            Lead(
+                user_id=user.id,
+                source=body.source,
+                name=name,
+                phone=phone,
+                email=email,
+                area=row.area.strip(),
+                intent_notes=row.notes.strip(),
+                consent_timestamp=now,
+                score=0,
+                status="new",
+                metadata_json="{}",
+                created_at=now,
+            )
+        )
+        created += 1
+    db.commit()
+    return {"imported": created, "skipped": skipped}
 
 
 @router.get("")

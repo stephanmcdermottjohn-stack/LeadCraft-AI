@@ -28,6 +28,8 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(255))
     plan_tier: Mapped[str] = mapped_column(String(50), default="basic")
+    # Platform admin (staff account): can read /api/admin/overview stats.
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     settings: Mapped["ClientSettings"] = relationship(back_populates="user", uselist=False)
@@ -50,6 +52,9 @@ class ClientSettings(Base):
     # extras (buy/rent/sell, property type, budget) and the dashboard surfaces
     # them. Off = plain service-business form.
     show_property_fields: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Phase 3D: which business template drives the landing form extras
+    # (property, ecommerce, hospitality, ...). "" = general.
+    business_type: Mapped[str] = mapped_column(String(50), default="")
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     user: Mapped[User] = relationship(back_populates="settings")

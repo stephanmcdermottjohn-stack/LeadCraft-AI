@@ -123,6 +123,8 @@ def test_public_landing_config_display_fields_only(client, owner_headers):
         "niche": "bridal makeup",
         "target_area": "Gulberg Lahore",
         "show_property_fields": False,
+        "business_type": "",
+        "extra_fields": [],
     }
     # No credentials, no other fields leak.
     assert "brand_voice" not in body
@@ -290,3 +292,117 @@ def test_lead_notes_add_list_and_isolation(client, owner_headers):
     oh = {"Authorization": f"Bearer {other.json()['token']}"}
     assert client.get(f"/api/leads/{lead['id']}/notes", headers=oh).status_code == 404
     assert client.post(f"/api/leads/{lead['id']}/notes", json={"body": "hijack"}, headers=oh).status_code == 404
+
+
+# --- business templates (Phase 3D) ---------------------------------------------
+
+def test_business_type_validation_and_roundtrip(client, owner_headers):
+    res = client.patch("/api/settings", json={"business_type": "hospitality"}, headers=owner_headers)
+    assert res.status_code == 200
+    assert res.json()["settings"]["business_type"] == "hospitality"
+    assert client.patch("/api/settings", json={"business_type": "nonsense"}, headers=owner_headers).status_code == 400
+    assert client.patch("/api/settings", json={"business_type": ""}, headers=owner_headers).status_code == 200
+    assert client.patch("/api/settings", json={"business_type": "property"}, headers=owner_headers).status_code == 200
+
+
+def test_landing_extras_follow_template_and_toggle(client, owner_headers):
+    client.patch("/api/settings", json={"business_type": "property", "show_property_fields": True}, headers=owner_headers)
+    body = client.get("/api/public/landing/gulberg-salon").json()
+    keys = [e["key"] for e in body["extra_fields"]]
+    assert keys == ["deal_type", "property_type", "budget"]
+    assert body["extra_fields"][0]["options"] == ["buy", "rent", "sell"]
+
+    # Hospitality template swaps the field set.
+    client.patch("/api/settings", json={"business_type": "hospitality"}, headers=owner_headers)
+    body = client.get("/api/public/landing/gulberg-salon").json()
+    keys = [e["key"] for e in body["extra_fields"]]
+    assert keys == ["room_type", "guests", "stay_dates", "budget"]
+
+    # Toggle off -> no extras.
+    client.patch("/api/settings", json={"show_property_fields": False}, headers=owner_headers)
+    body = client.get("/api/public/landing/gulberg-salon").json()
+    assert body["extra_fields"] == []
+    client.patch("/api/settings", json={"show_property_fields": True}, headers=owner_headers)
+
+
+def test_capture_generic_extra_whitelisted_and_stored(client, owner_headers):
+    client.patch(
+        "/api/settings",
+        json={"business_type": "hospitality", "show_property_fields": True},
+        headers=owner_headers,
+    )
+    _capture(client, extra={"room_type": "suite", "guests": "3", "stay_dates": "Dec 20-22"})
+    lead = client.get("/api/leads", headers=owner_headers).json()["leads"][0]
+    assert lead["metadata"] == {"room_type": "suite", "guests": "3", "stay_dates": "Dec 20-22"}
+
+    # Unknown / not-enabled keys are silently dropped (no junk in metadata).
+    _capture(client, name="Bot Keys", email="botkeys@leadcrafttest.com", phone="",
+             extra={"room_type": "deluxe", "evil_key": "x", "budget": "10k"})
+    lead = client.get("/api/leads", headers=owner_headers).json()["leads"][0]
+    assert lead["metadata"] == {"room_type": "deluxe", "budget": "10k"}
+
+
+# --- manual platform-export import (Meta/Google) -------------------------------
+
+def test_lead_import_requires_platform_source_and_consent(client, owner_headers):
+    rows = [{"name": "R1", "phone": "03001112233"}, {"name": "R2", "email": "r2@leadcrafttest.com"}]
+    res = client.post("/api/leads/import", json={"source": "landing_page", "consent": True, "rows": rows}, headers=owner_headers)
+    assert res.status_code == 400
+    res = client.post("/api/leads/import", json={"source": "meta_lead_ad", "consent": False, "rows": rows}, headers=owner_headers)
+    assert res.status_code == 400
+    res = client.post("/api/leads/import", json={"source": "meta_lead_ad", "consent": True, "rows": []}, headers=owner_headers)
+    assert res.status_code == 400
+
+
+def test_lead_import_creates_leads_skips_malformed(client, owner_headers):
+    rows = [
+        {"name": "Farhan Ali", "phone": "03214445566", "area": "Johar Town", "notes": "Renovation quote"},
+        {"name": "", "phone": "03009998877"},            # no name -> skipped
+        {"name": "No Contact", "phone": "", "email": ""},  # no phone/email -> skipped
+        {"name": "Zoya Butt", "email": "zoya@leadcrafttest.com", "notes": "Bridal package"},
+    ]
+    res = client.post("/api/leads/import", json={"source": "google_lead_form", "consent": True, "rows": rows}, headers=owner_headers)
+    assert res.status_code == 201, res.text
+    assert res.json() == {"imported": 2, "skipped": 2}
+
+    leads = client.get("/api/leads", headers=owner_headers).json()["leads"]
+    imported = [l for l in leads if l["source"] == "google_lead_form"]
+    assert {l["name"] for l in imported} == {"Farhan Ali", "Zoya Butt"}
+    assert all(l["consent_timestamp"] for l in imported)
+
+    # Cross-user isolation: another user's import doesn't leak.
+    other = client.post(
+        "/api/auth/register",
+        json={"business_name": "Other", "email": "impother@leadcrafttest.com", "password": "supersecret1"},
+    )
+    oh = {"Authorization": f"Bearer {other.json()['token']}"}
+    assert client.get("/api/leads", headers=oh).json()["leads"] == []
+
+
+# --- admin overview (Phase 3D) -------------------------------------------------
+
+def test_admin_overview_requires_admin(client, owner_headers):
+    assert client.get("/api/admin/overview", headers=owner_headers).status_code == 403
+
+
+def test_admin_overview_stats(client, owner_headers):
+    _capture(client)
+    _capture(client, name="Second Lead", email="second@leadcrafttest.com", phone="")
+
+    from app.models import User as UserModel
+    user = client.get("/api/auth/me", headers=owner_headers).json()["user"]
+    # Promote via the session's engine (test fixture DB is per-module).
+    from app.db import SessionLocal
+    db = SessionLocal()
+    db_user = db.get(UserModel, user["id"])
+    db_user.is_admin = True
+    db.commit()
+    db.close()
+
+    body = client.get("/api/admin/overview", headers=owner_headers).json()
+    assert body["total_users"] >= 1
+    assert body["total_leads"] >= 2
+    assert body["leads_by_status"].get("new", 0) >= 2
+    assert body["leads_by_source"].get("landing_page", 0) >= 2
+    assert any(u["email"] == "owner@leadcrafttest.com" for u in body["recent_users"])
+    assert all("business_name" in u and "email" in u and "lead_count" in u for u in body["recent_users"])

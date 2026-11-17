@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import db as db_module
+from app.api.admin import router as admin_router
 from app.api.auth import router as auth_router
 from app.api.content import router as content_router
 from app.api.health import router as health_router
@@ -67,6 +68,7 @@ def create_app() -> FastAPI:
     app.include_router(settings_router)
     app.include_router(leads_router)
     app.include_router(public_router)
+    app.include_router(admin_router)
 
     # MVP convenience: create tables on boot. Replace with Alembic before
     # any real production data exists.

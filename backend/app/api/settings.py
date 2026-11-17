@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.api.auth import get_current_user
 from app.db import get_db
 from app.models import ClientSettings, User
+from app.services import business_types
 
 router = APIRouter(prefix="/api/settings")
 
@@ -27,6 +28,9 @@ class SettingsBody(BaseModel):
     landing_slug: str | None = Field(default=None, max_length=100)
     # Phase 3B property module toggle (real-estate extra fields on the form).
     show_property_fields: bool | None = None
+    # Phase 3D business template (property / ecommerce / hospitality / ...).
+    # "" = general. Must match a template key; 400 otherwise.
+    business_type: str | None = Field(default=None, max_length=50)
 
 
 def _slugify(text: str) -> str:
@@ -46,6 +50,7 @@ def _public(s: ClientSettings) -> dict:
         "brand_voice": s.brand_voice,
         "landing_slug": s.landing_slug,
         "show_property_fields": bool(s.show_property_fields),
+        "business_type": s.business_type or "",
     }
 
 
@@ -98,6 +103,15 @@ def update_settings(body: SettingsBody, user: User = Depends(get_current_user), 
 
     if body.show_property_fields is not None:
         row.show_property_fields = bool(body.show_property_fields)
+
+    if body.business_type is not None:
+        value = body.business_type.strip()
+        if value and not business_types.is_valid_type(value):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown business_type. Valid: {sorted(business_types.BUSINESS_TYPES)}",
+            )
+        row.business_type = value
 
     db.commit()
     return {"settings": _public(row)}

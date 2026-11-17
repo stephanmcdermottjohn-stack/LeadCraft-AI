@@ -4,6 +4,29 @@ import { api, clearSession, getToken, getUser, setSession } from "./api/client";
 const PLATFORMS = ["facebook", "instagram", "tiktok", "whatsapp_status", "other"];
 const NAV_ITEMS = ["Dashboard", "Content", "Leads", "Conversations", "Settings"];
 
+// Business templates (mirrors backend/app/services/business_types.py keys).
+// Selecting one prefills a niche suggestion and turns on the landing extras.
+const BUSINESS_TYPES = [
+  { value: "", label: "General / Other", hint: "" },
+  { value: "property", label: "Property / Real Estate", hint: "real estate agency and dealer services" },
+  { value: "ecommerce", label: "E-Commerce / Retail Store", hint: "online store and retail products" },
+  { value: "hospitality", label: "Hotel / Guest House", hint: "hotel rooms and guest house bookings" },
+  { value: "restaurant", label: "Restaurant / Cafe / Catering", hint: "restaurant dining and catering services" },
+  { value: "salon", label: "Salon / Beauty / Spa", hint: "salon, bridal makeup and spa services" },
+  { value: "health", label: "Clinic / Healthcare", hint: "clinic consultations and healthcare services" },
+  { value: "education", label: "Education / Coaching / Tuition", hint: "coaching classes and tuition services" },
+  { value: "fitness", label: "Gym / Fitness Trainer", hint: "gym membership and personal training" },
+  { value: "travel", label: "Travel Agency / Tours", hint: "tour packages and travel bookings" },
+  { value: "auto", label: "Car Dealer / Auto Workshop", hint: "car sales and auto services" },
+  { value: "construction", label: "Construction / Architect", hint: "construction and architectural design services" },
+  { value: "legal", label: "Lawyer / Legal Services", hint: "legal consultation and representation" },
+  { value: "events", label: "Event Management / Wedding Planner", hint: "event planning and wedding services" },
+  { value: "photography", label: "Photography / Studio", hint: "photography and videography services" },
+  { value: "cleaning", label: "Cleaning / Maintenance Services", hint: "cleaning, repair and maintenance services" },
+  { value: "finance", label: "Finance / Insurance / Loans", hint: "insurance policies and loan advisory" },
+  { value: "it", label: "IT / Software Services", hint: "software development and IT services" },
+];
+
 function AuthScreen({ onAuthed }) {
   const [mode, setMode] = useState("login");
   const [form, setForm] = useState({ business_name: "", email: "", password: "" });
@@ -221,7 +244,7 @@ function ContentPanel() {
 }
 
 function SettingsPanel({ user, onLogout }) {
-  const [settings, setSettings] = useState({ niche: "", target_area: "", brand_voice: "", landing_slug: null, show_property_fields: false });
+  const [settings, setSettings] = useState({ niche: "", target_area: "", brand_voice: "", landing_slug: null, show_property_fields: false, business_type: "" });
   const [slugInput, setSlugInput] = useState("");
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
@@ -235,6 +258,18 @@ function SettingsPanel({ user, onLogout }) {
       .catch((err) => setError(err.message));
   }, []);
 
+  const setType = (value) => {
+    const tmpl = BUSINESS_TYPES.find((t) => t.value === value);
+    setSettings((s) => ({
+      ...s,
+      business_type: value,
+      // One-click convenience: suggest a niche when the field is empty, and
+      // turn the extras toggle on for any template that has extra fields.
+      niche: !s.niche && tmpl?.hint ? tmpl.hint : s.niche,
+      show_property_fields: value && tmpl?.hint ? true : s.show_property_fields,
+    }));
+  };
+
   const save = async () => {
     try {
       const payload = {
@@ -243,8 +278,9 @@ function SettingsPanel({ user, onLogout }) {
         brand_voice: settings.brand_voice,
         // Empty input keeps the existing slug; "auto" derives from the name.
         landing_slug: slugInput === (settings.landing_slug ?? "") ? null : slugInput || null,
-        // Toggle is always sent so the checkbox is the source of truth.
+        // Toggle + template are always sent so the controls are the source of truth.
         show_property_fields: settings.show_property_fields,
+        business_type: settings.business_type,
       };
       const b = await api("/api/settings", { method: "PATCH", body: JSON.stringify(payload) });
       setSettings(b.settings);
@@ -286,6 +322,21 @@ function SettingsPanel({ user, onLogout }) {
         {field("niche", "Niche (e.g. bridal makeup, real estate)")}
         {field("target_area", "Target area (e.g. DHA Lahore)")}
         {field("brand_voice", "Brand voice (e.g. warm, premium)", true)}
+        <label className="block text-sm">
+          Business type
+          <select
+            className="mt-1 block w-full rounded-lg bg-slate-800 px-3 py-2"
+            value={settings.business_type}
+            onChange={(e) => setType(e.target.value)}
+          >
+            {BUSINESS_TYPES.map((t) => (
+              <option key={t.value} value={t.value}>{t.label}</option>
+            ))}
+          </select>
+          <span className="block text-xs text-slate-500 mt-1">
+            Ready-made template: sets a niche suggestion and the right extra fields on your landing page.
+          </span>
+        </label>
         <label className="block text-sm">
           Landing page slug
           <div className="flex gap-2 mt-1">
@@ -338,7 +389,8 @@ function SettingsPanel({ user, onLogout }) {
 
 function LandingPage({ slug }) {
   const [config, setConfig] = useState(null);
-  const [form, setForm] = useState({ name: "", phone: "", email: "", area: "", intent_notes: "", deal_type: "", property_type: "", budget: "" });
+  const [form, setForm] = useState({ name: "", phone: "", email: "", area: "", intent_notes: "" });
+  const [extra, setExtra] = useState({});
   const [consent, setConsent] = useState(false);
   const [done, setDone] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -366,9 +418,7 @@ function LandingPage({ slug }) {
           email: form.email,
           area: form.area,
           intent_notes: form.intent_notes,
-          deal_type: config.show_property_fields ? form.deal_type : "",
-          property_type: config.show_property_fields ? form.property_type : "",
-          budget: config.show_property_fields ? form.budget : "",
+          extra: config.extra_fields?.length ? extra : {},
           company,
           consent,
         }),
@@ -442,42 +492,34 @@ function LandingPage({ slug }) {
                 onChange={(e) => setForm({ ...form, intent_notes: e.target.value })}
               />
             </label>
-            {config.show_property_fields && (
+            {config.extra_fields?.length > 0 && (
               <div className="space-y-3 rounded-lg border border-slate-800 bg-slate-950 p-3">
-                <p className="text-xs text-slate-400 font-semibold">Property details (optional)</p>
-                <div className="grid grid-cols-2 gap-2">
-                  <label className="block text-sm">
-                    I want to
-                    <select
-                      className="mt-1 block w-full rounded-lg bg-slate-800 px-3 py-2"
-                      value={form.deal_type}
-                      onChange={(e) => setForm({ ...form, deal_type: e.target.value })}
-                    >
-                      <option value="">—</option>
-                      <option value="buy">Buy</option>
-                      <option value="rent">Rent</option>
-                      <option value="sell">Sell</option>
-                    </select>
+                <p className="text-xs text-slate-400 font-semibold">Additional details (optional)</p>
+                {config.extra_fields.map((f, idx) => (
+                  <label key={f.key} className={`block text-sm ${idx < config.extra_fields.length - 1 ? "" : ""}`}>
+                    {f.label}
+                    {f.type === "select" ? (
+                      <select
+                        className="mt-1 block w-full rounded-lg bg-slate-800 px-3 py-2"
+                        value={extra[f.key] ?? ""}
+                        onChange={(e) => setExtra({ ...extra, [f.key]: e.target.value })}
+                      >
+                        <option value="">—</option>
+                        {(f.options ?? []).map((o) => (
+                          <option key={o} value={o}>{o}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        className="mt-1 block w-full rounded-lg bg-slate-800 px-3 py-2"
+                        type={f.type === "number" ? "number" : "text"}
+                        placeholder={f.label}
+                        value={extra[f.key] ?? ""}
+                        onChange={(e) => setExtra({ ...extra, [f.key]: e.target.value })}
+                      />
+                    )}
                   </label>
-                  <label className="block text-sm">
-                    Property type
-                    <input
-                      className="mt-1 block w-full rounded-lg bg-slate-800 px-3 py-2"
-                      placeholder="e.g. 5 Marla house"
-                      value={form.property_type}
-                      onChange={(e) => setForm({ ...form, property_type: e.target.value })}
-                    />
-                  </label>
-                </div>
-                <label className="block text-sm">
-                  Budget
-                  <input
-                    className="mt-1 block w-full rounded-lg bg-slate-800 px-3 py-2"
-                    placeholder="e.g. 2.5 crore / 80,000 per month"
-                    value={form.budget}
-                    onChange={(e) => setForm({ ...form, budget: e.target.value })}
-                  />
-                </label>
+                ))}
               </div>
             )}
             {/* Honeypot — visually hidden, humans never fill this */}
@@ -527,6 +569,10 @@ function LeadsPanel() {
   const [openNotes, setOpenNotes] = useState(null); // lead id
   const [notes, setNotes] = useState({});
   const [noteDraft, setNoteDraft] = useState("");
+  const [showImport, setShowImport] = useState(false);
+  const [importSource, setImportSource] = useState("meta_lead_ad");
+  const [importConsent, setImportConsent] = useState(false);
+  const [importMsg, setImportMsg] = useState("");
   const STATUSES = ["new", "contacted", "converted", "archived"];
   const SOURCES = ["landing_page", "meta_lead_ad", "google_lead_form", "whatsapp_inbound", "direct_message"];
 
@@ -602,8 +648,77 @@ function LeadsPanel() {
   };
 
   const mdLine = (md) => {
-    const parts = [md.deal_type, md.property_type, md.budget].filter(Boolean);
-    return parts.length ? parts.join(" · ") : "";
+    const entries = Object.entries(md ?? {}).filter(([, v]) => String(v).trim());
+    if (!entries.length) return "";
+    // Legacy property keys display bare; template extras show as key: value.
+    return entries.map(([k, v]) => (["deal_type", "property_type", "budget"].includes(k) ? v : `${k}: ${v}`)).join(" · ");
+  };
+
+  // Minimal quoted-CSV parser (handles "quoted, values" and "" escapes).
+  const parseCsv = (text) => {
+    const rows = [];
+    let cur = [];
+    let val = "";
+    let inQ = false;
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      if (inQ) {
+        if (ch === '"') {
+          if (text[i + 1] === '"') { val += '"'; i++; } else { inQ = false; }
+        } else val += ch;
+      } else if (ch === '"') inQ = true;
+      else if (ch === ",") { cur.push(val); val = ""; }
+      else if (ch === "\n" || ch === "\r") {
+        if (ch === "\r" && text[i + 1] === "\n") i++;
+        cur.push(val); val = "";
+        rows.push(cur); cur = [];
+      } else val += ch;
+    }
+    if (val !== "" || cur.length) { cur.push(val); rows.push(cur); }
+    return rows.filter((r) => r.some((c) => c.trim() !== ""));
+  };
+
+  const importCsv = async (file) => {
+    setError("");
+    setImportMsg("");
+    const text = await file.text();
+    const table = parseCsv(text);
+    if (table.length < 2) {
+      setImportMsg("CSV has no data rows.");
+      return;
+    }
+    const header = table[0].map((h) => h.trim().toLowerCase());
+    const find = (...names) => names.find((n) => header.includes(n));
+    const iName = find("name", "full name");
+    const iPhone = find("phone", "phone number", "mobile");
+    const iEmail = find("email", "email address");
+    const iArea = find("area", "city", "location", "address");
+    const iNotes = find("notes", "note", "what do you need", "details", "message", "comments");
+    if (iName === undefined || (iPhone === undefined && iEmail === undefined)) {
+      setImportMsg("CSV needs a Name column and a Phone or Email column.");
+      return;
+    }
+    const rows = table.slice(1).map((r) => ({
+      name: (r[iName] ?? "").trim(),
+      phone: iPhone !== undefined ? (r[iPhone] ?? "").trim() : "",
+      email: iEmail !== undefined ? (r[iEmail] ?? "").trim() : "",
+      area: iArea !== undefined ? (r[iArea] ?? "").trim() : "",
+      notes: iNotes !== undefined ? (r[iNotes] ?? "").trim() : "",
+    }));
+    if (!importConsent) {
+      setImportMsg("Confirm the consent checkbox first.");
+      return;
+    }
+    try {
+      const b = await api("/api/leads/import", {
+        method: "POST",
+        body: JSON.stringify({ source: importSource, consent: true, rows }),
+      });
+      setImportMsg(`Imported ${b.imported} leads (${b.skipped} skipped).`);
+      loadLeads();
+    } catch (err) {
+      setImportMsg(err instanceof Error ? err.message : "Import failed.");
+    }
   };
 
   return (
@@ -628,10 +743,39 @@ function LeadsPanel() {
             <option key={s}>{s}</option>
           ))}
         </select>
+        <button className="rounded-lg bg-slate-800 px-3 py-2 text-sm hover:bg-slate-700" onClick={() => { setShowImport(!showImport); setImportMsg(""); }}>
+          Import CSV
+        </button>
         <button className="rounded-lg bg-slate-800 px-3 py-2 text-sm hover:bg-slate-700" onClick={exportCsv}>
           Export CSV
         </button>
       </div>
+      {showImport && (
+        <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-3 text-sm">
+          <p className="font-semibold">Import leads from a platform export</p>
+          <p className="text-xs text-slate-400">
+            Meta Lead Ads ya Google lead form ki CSV export yahan import karo — leads us platform pe pehle se
+            consent de chuki hoti hain. Consent timestamp import time pe record hota hai.
+          </p>
+          <div className="flex flex-wrap gap-3 items-center">
+            <select className="rounded-lg bg-slate-800 px-2 py-2 text-sm" value={importSource} onChange={(e) => setImportSource(e.target.value)}>
+              <option value="meta_lead_ad">Meta Lead Ads export</option>
+              <option value="google_lead_form">Google lead form export</option>
+            </select>
+            <input
+              type="file"
+              accept=".csv,text/csv"
+              className="text-xs"
+              onChange={(e) => e.target.files?.[0] && importCsv(e.target.files[0])}
+            />
+          </div>
+          <label className="flex items-center gap-2 text-xs">
+            <input type="checkbox" checked={importConsent} onChange={(e) => setImportConsent(e.target.checked)} />
+            I confirm these leads consented on the source platform (Meta / Google form).
+          </label>
+          {importMsg && <p className="text-xs text-sky-300">{importMsg}</p>}
+        </div>
+      )}
       <div className="rounded-xl border border-slate-800 bg-slate-900 p-6">
         <h3 className="font-semibold mb-3">Leads ({leads.length})</h3>
         {leads.length === 0 && (
@@ -705,6 +849,80 @@ function LeadsPanel() {
   );
 }
 
+function AdminPanel() {
+  const [stats, setStats] = useState(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    api("/api/admin/overview")
+      .then(setStats)
+      .catch((err) => setError(err instanceof Error ? err.message : "Load failed."));
+  }, []);
+
+  if (error) {
+    return <div className="rounded-xl border border-slate-800 bg-slate-900 p-6 text-sm text-red-400">{error}</div>;
+  }
+  if (!stats) {
+    return <div className="text-sm text-slate-400">Loading platform stats…</div>;
+  }
+  return (
+    <div className="space-y-4 max-w-3xl">
+      <div className="grid grid-cols-2 gap-4">
+        <div className="rounded-xl border border-slate-800 bg-slate-900 p-6">
+          <p className="text-3xl font-bold">{stats.total_users}</p>
+          <p className="text-xs text-slate-400">Registered businesses</p>
+        </div>
+        <div className="rounded-xl border border-slate-800 bg-slate-900 p-6">
+          <p className="text-3xl font-bold">{stats.total_leads}</p>
+          <p className="text-xs text-slate-400">Total leads (all businesses)</p>
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-4">
+        <div className="rounded-xl border border-slate-800 bg-slate-900 p-6">
+          <p className="font-semibold mb-2">Leads by source</p>
+          <ul className="text-sm text-slate-300 space-y-1">
+            {Object.entries(stats.leads_by_source).map(([k, v]) => (
+              <li key={k} className="flex justify-between"><span>{k}</span><span>{v}</span></li>
+            ))}
+          </ul>
+        </div>
+        <div className="rounded-xl border border-slate-800 bg-slate-900 p-6">
+          <p className="font-semibold mb-2">Leads by status</p>
+          <ul className="text-sm text-slate-300 space-y-1">
+            {Object.entries(stats.leads_by_status).map(([k, v]) => (
+              <li key={k} className="flex justify-between"><span>{k}</span><span>{v}</span></li>
+            ))}
+          </ul>
+        </div>
+      </div>
+      <div className="rounded-xl border border-slate-800 bg-slate-900 p-6">
+        <p className="font-semibold mb-3">Recent businesses</p>
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-xs text-slate-500">
+              <th className="pb-2">Business</th><th className="pb-2">Email</th><th className="pb-2">Plan</th><th className="pb-2">Leads</th><th className="pb-2">Joined</th>
+            </tr>
+          </thead>
+          <tbody>
+            {stats.recent_users.map((u) => (
+              <tr key={u.id} className="border-t border-slate-800">
+                <td className="py-2">{u.business_name}</td>
+                <td className="py-2 text-slate-400">{u.email}</td>
+                <td className="py-2 text-slate-400">{u.plan_tier}</td>
+                <td className="py-2">{u.lead_count}</td>
+                <td className="py-2 text-slate-500">{u.created_at ? new Date(u.created_at).toLocaleDateString() : ""}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-xs text-slate-500">
+        Admins see aggregate stats only — individual leads stay visible to their owning business (privacy rule).
+      </p>
+    </div>
+  );
+}
+
 export default function App() {
   // Public landing pages live at /l/<slug> — render them with no dashboard,
   // no auth state, and no dashboard data in the bundle path.
@@ -719,6 +937,7 @@ function DashboardApp() {
 
   if (!user) return <AuthScreen onAuthed={setUser} />;
 
+  const navItems = user.is_admin ? [...NAV_ITEMS, "Admin"] : NAV_ITEMS;
   const logout = () => {
     clearSession();
     setUser(null);
@@ -730,7 +949,7 @@ function DashboardApp() {
         <h1 className="text-lg font-bold mb-1">LeadCraft AI</h1>
         <p className="text-xs text-slate-400 mb-6">AI content · compliant leads · CRM</p>
         <nav className="space-y-1">
-          {NAV_ITEMS.map((item) => (
+          {navItems.map((item) => (
             <button
               key={item}
               onClick={() => setActive(item)}
@@ -758,6 +977,7 @@ function DashboardApp() {
         {active === "Content" && <ContentPanel />}
         {active === "Leads" && <LeadsPanel />}
         {active === "Settings" && <SettingsPanel user={user} onLogout={logout} />}
+        {active === "Admin" && <AdminPanel />}
         {active === "Conversations" && (
           <div className="rounded-xl border border-slate-800 bg-slate-900 p-6 text-sm text-slate-400">
             This panel ships in Phase 4 (WhatsApp funnel).
