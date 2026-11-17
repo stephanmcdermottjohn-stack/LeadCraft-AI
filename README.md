@@ -43,9 +43,11 @@ pytest
 |---|---|---|
 | 1 | Skeleton, health API, auth (register/login/me), DB schema (6 tables), Supabase connected, deploy pipeline | ✅ done + deployed |
 | 2 | AI content engine + scheduling | ✅ core done: generate (mock/gemini), schedule, due-worker, settings personalization, Content+Settings UI |
-| 3 | Compliant lead capture (Meta Lead Ads, landing pages, property module) | 🚧 core done: landing pages `/l/<slug>` + consent-first capture + property fields toggle + lead notes + search/filter + CSV export; Meta webhook pending dev account |
+| 3 | Compliant lead capture (Meta Lead Ads, landing pages, property module) | 🚧 core done: landing pages `/l/<slug>` + consent-first capture + 18 business-type templates with per-industry landing extras + lead notes + search/filter + CSV export + manual platform-CSV import; Meta webhook pending dev account |
 | 4 | WhatsApp chatbot + CRM funnel (Chatwoot + n8n) | not started |
 | 5 | Integration, pilot | not started |
+
+**Admin dashboard (Phase 3D):** platform-staff accounts (`users.is_admin`) see aggregate stats (businesses, leads by source/status, recent signups) at the **Admin** nav item; individual leads stay user-scoped (privacy). Create: `python scripts/make_admin.py <email> <password>`.
 
 ## Live deployment (Vercel, free tier)
 
