@@ -25,12 +25,15 @@ Response 200:
 - `POST /api/webhooks/whatsapp` — WhatsApp Cloud API inbound; bot replies ONLY to opted-in/inbound contacts (Phase 4)
 
 ## Live (Phase 3 — landing page lead capture)
-- `POST /api/leads/capture` — the ONLY public lead-write endpoint. Requires `slug` (business landing page), `name`, `consent: true`, and at least one of phone/email. `consent_timestamp` is recorded SERVER-SIDE. Honeypot `company` field silently rejects bots (400). `source` is fixed to `landing_page`. 201 → `{lead: {id, status}}`.
-- `GET /api/public/landing/{slug}` — public, no-auth landing page config. Returns ONLY business display fields (business_name, niche, target_area). Never personal data or other clients' rows. 404 for unknown slugs.
-- `GET /api/leads` — auth. The owner's leads, newest first (max 200). Each row carries `source`, `consent_timestamp`, `status`, `metadata`.
+- `POST /api/leads/capture` — the ONLY public lead-write endpoint. Requires `slug` (business landing page), `name`, `consent: true`, and at least one of phone/email. `consent_timestamp` is recorded SERVER-SIDE. Honeypot `company` field silently rejects bots (400). `source` is fixed to `landing_page`. Optional property fields (only when the business enables `show_property_fields`): `deal_type` (buy/rent/sell), `property_type`, `budget` — stored in `metadata_json`. 201 → `{lead: {id, status}}`.
+- `GET /api/public/landing/{slug}` — public, no-auth landing page config. Returns ONLY business display fields (business_name, niche, target_area, show_property_fields). Never personal data or other clients' rows. 404 for unknown slugs.
+- `GET /api/leads?q=&status=&source=` — auth. The owner's leads, newest first (max 200). Filters: `q` (ilike over name/phone/email/area/intent_notes), `status` ∈ {new, contacted, converted, archived}, `source` ∈ allowlist; invalid values → 400. Each row carries `source`, `consent_timestamp`, `status`, `metadata` (parsed dict).
+- `GET /api/leads/export.csv` — auth. Streaming CSV download (user-scoped, max 5000 rows). Columns: id, created_at, source, status, name, phone, email, area, deal_type, property_type, budget, intent_notes, consent_timestamp. `Content-Disposition: attachment; filename="leads-<date>.csv"`.
+- `GET /api/leads/{id}/notes` — auth. The lead's notes, newest first. Other users' leads → 404.
+- `POST /api/leads/{id}/notes` — auth, 201. Body `{body: string}` 1–2000 chars; whitespace-only → 422. Append-only (no edit/delete in MVP). Other users' leads → 404.
 - `PATCH /api/leads/{id}/status` — auth. Status ∈ {new, contacted, converted, archived}; other users' leads → 404.
-- `GET /api/settings` / `PATCH /api/settings` — auth. Now includes `landing_slug`. PATCH semantics: omitted field = keep existing; `landing_slug: "auto"` derives a slug from the business name (suffix -2, -3… on conflicts); explicit slug validated (`^[a-z0-9](?:[a-z0-9-]{1,98}[a-z0-9])?$`, reserved words rejected) and globally unique (409 on conflict).
-- Landing page URL: `/l/<slug>` (frontend SPA route).
+- `GET /api/settings` / `PATCH /api/settings` — auth. Now includes `landing_slug` and `show_property_fields` (Phase 3B property module toggle). PATCH semantics: omitted field = keep existing; `show_property_fields` is a boolean; `landing_slug: "auto"` derives a slug from the business name (suffix -2, -3… on conflicts); explicit slug validated (`^[a-z0-9](?:[a-z0-9-]{1,98}[a-z0-9])?$`, reserved words rejected) and globally unique (409 on conflict).
+- Landing page URL: `/l/<slug>` (frontend SPA route); shows the property extras block when the business has `show_property_fields` on.
 
 ## Ground rules encoded in contracts (Section 0 of the roadmap)
 - Every lead write requires a `source` from the allowlist and a `consent_timestamp`.

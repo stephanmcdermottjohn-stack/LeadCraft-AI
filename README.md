@@ -43,7 +43,7 @@ pytest
 |---|---|---|
 | 1 | Skeleton, health API, auth (register/login/me), DB schema (6 tables), Supabase connected, deploy pipeline | ✅ done + deployed |
 | 2 | AI content engine + scheduling | ✅ core done: generate (mock/gemini), schedule, due-worker, settings personalization, Content+Settings UI |
-| 3 | Compliant lead capture (Meta Lead Ads, landing pages, property module) | 🚧 core done: landing pages `/l/<slug>` + consent-first lead capture + Leads dashboard; Meta webhook pending dev account |
+| 3 | Compliant lead capture (Meta Lead Ads, landing pages, property module) | 🚧 core done: landing pages `/l/<slug>` + consent-first capture + property fields toggle + lead notes + search/filter + CSV export; Meta webhook pending dev account |
 | 4 | WhatsApp chatbot + CRM funnel (Chatwoot + n8n) | not started |
 | 5 | Integration, pilot | not started |
 
