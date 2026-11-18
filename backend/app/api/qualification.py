@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.api.auth import get_current_user
 from app.db import get_db
-from app.models import Lead, LeadQualification, User
+from app.models import Lead, LeadActivity, LeadQualification, User
 from app.services import qualification as svc
 
 router = APIRouter(prefix="/api/leads")
@@ -70,5 +70,11 @@ def patch_qualification(
         raise HTTPException(status_code=400, detail="Nothing to update - send at least one dimension.")
     row = _get_or_create_row(db, lead)
     svc.apply_patch(row, updates)
+    db.add(
+        LeadActivity(
+            lead_id=lead.id, user_id=user.id, kind="qualification_updated",
+            detail="BANT updated: " + ", ".join(f"{d}={updates[d]}" for d in updates),
+        )
+    )
     db.commit()
     return {"qualification": svc.serialize(row)}

@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 
 from app.api.auth import get_current_user
 from app.db import get_db
-from app.models import ClientSettings, Lead, LeadNote, LeadStageHistory, User
+from app.models import ClientSettings, Lead, LeadActivity, LeadNote, LeadStageHistory, User
 from app.services.business_types import EXTRA_VALUE_MAX, extras_for
 from app.services.lifecycle import default_next_action, is_valid_stage
 
@@ -370,6 +370,14 @@ def update_status(
     lead = db.get(Lead, lead_id)
     if lead is None or lead.user_id != user.id:
         raise HTTPException(status_code=404, detail="Lead not found.")
+    if lead.status != body.status:
+        # Timeline activity (P0 #6): log real changes only.
+        db.add(
+            LeadActivity(
+                lead_id=lead.id, user_id=user.id, kind="status_changed",
+                detail=f"CRM status: {lead.status} -> {body.status}",
+            )
+        )
     lead.status = body.status
     # Lifecycle bridge: a won/converted CRM status advances the lifecycle to
     # the convert stage (logged). Other statuses don't touch the stage —

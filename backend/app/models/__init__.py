@@ -223,6 +223,23 @@ class LeadScoreHistory(Base):
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class LeadActivity(Base):
+    """Lightweight activity log for timeline events that live outside
+    dedicated tables (P0 #6): CRM status changes and BANT edits. Notes have
+    lead_notes, stage moves have lead_stage_history — those are merged at the
+    timeline endpoint. Append-only."""
+
+    __tablename__ = "lead_activities"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    lead_id: Mapped[int] = mapped_column(ForeignKey("leads.id"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    # status_changed | qualification_updated (more kinds may follow).
+    kind: Mapped[str] = mapped_column(String(50))
+    detail: Mapped[str] = mapped_column(String(500), default="")
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class LeadNote(Base):
     """CRM follow-up notes on a lead (Phase 3C). User-scoped; only the lead's
     owner can read/write. Free-form text, timestamped, append-only (no edit/

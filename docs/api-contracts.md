@@ -73,6 +73,11 @@ Response 200:
 - `GET /api/scoring/feedback` — auth. Recalibration hook: `{converted_count, avg_score_converted, avg_score_other, ready_for_recalibration, note}`. Honest: below 5 converted leads with snapshots it explicitly says no recalibration is suggested; even when ready, recalibration stays a human decision (no auto weight changes).
 - Frontend: "⚡ Score lead" button per card with inline factor breakdown + snapshot count.
 
+## Live (AI LeadFlow P0 #6 — unified activity timeline)
+- `GET /api/leads/{id}/timeline` — auth, tenant-404. Read-only merge of the append-only sources, newest first: `lead_notes` (type `note`), `lead_stage_history` (type `stage`, includes the original capture row), `lead_activities` (type = kind: `status_changed`, `qualification_updated`). Each event: `{type, text, at}`. The endpoint fabricates nothing and rewrites nothing.
+- `lead_activities` records timeline events that live outside dedicated tables — CRM status changes (real changes only; setting the same status twice logs nothing) and BANT edits (`BANT updated: <dim>=<value>, ...`). Written by `PATCH /api/leads/{id}/status` and `PATCH /api/leads/{id}/qualification`.
+- Frontend: "Timeline" toggle per lead card with per-type color coding.
+
 ## Ground rules encoded in contracts (Section 0 of the roadmap)
 - Every lead write requires a `source` from the allowlist and a `consent_timestamp`.
 - No endpoint creates outbound-first contact. `messages.direction=in` rows must exist before the bot replies.

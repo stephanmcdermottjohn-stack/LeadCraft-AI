@@ -16,6 +16,7 @@ from app.api.leads import router as leads_router
 from app.api.public import router as public_router
 from app.api.qualification import router as qualification_router
 from app.api.scoring import leads_router as scoring_leads_router, scoring_router as scoring_feedback_router
+from app.api.timeline import router as timeline_router
 from app.api.settings import router as settings_router
 from app.config import get_settings
 from app.models import Base
@@ -75,6 +76,7 @@ def create_app() -> FastAPI:
     app.include_router(qualification_router)
     app.include_router(scoring_leads_router)
     app.include_router(scoring_feedback_router)
+    app.include_router(timeline_router)
     app.include_router(admin_router)
 
     # MVP convenience: create tables on boot. Replace with Alembic before

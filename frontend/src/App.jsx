@@ -955,6 +955,23 @@ function LeadsPanel() {
     }
   };
 
+  // Unified per-lead timeline (notes + stages + status + BANT edits).
+  const [timelines, setTimelines] = useState({});
+  const [openTimeline, setOpenTimeline] = useState(null);
+  const toggleTimeline = async (id) => {
+    if (openTimeline === id) {
+      setOpenTimeline(null);
+      return;
+    }
+    try {
+      const b = await api(`/api/leads/${id}/timeline`);
+      setTimelines((t) => ({ ...t, [id]: b.timeline }));
+      setOpenTimeline(id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Timeline load failed.");
+    }
+  };
+
   const mdLine = (md) => {
     const entries = Object.entries(md ?? {}).filter(([, v]) => String(v).trim());
     if (!entries.length) return "";
@@ -1222,7 +1239,25 @@ function LeadsPanel() {
                 )}
               </div>
               {l.intent_notes && <p className="mt-1 text-slate-400 whitespace-pre-wrap">{l.intent_notes}</p>}
-              <button className="mt-2 text-xs text-slate-400 hover:text-slate-200" onClick={() => toggleNotes(l.id)}>
+              <button className="mt-2 text-xs text-sky-300 hover:text-sky-200" onClick={() => toggleTimeline(l.id)}>
+                {openTimeline === l.id ? "Hide timeline" : "Timeline"}
+              </button>
+              {openTimeline === l.id && (
+                <ul className="mt-1 space-y-1 border-t border-slate-800 pt-2">
+                  {(timelines[l.id] ?? []).map((e, i) => (
+                    <li key={i} className="text-xs">
+                      <span className={
+                        e.type === "note" ? "text-sky-300" :
+                        e.type === "stage" ? "text-amber-300" :
+                        e.type === "status_changed" ? "text-violet-300" : "text-emerald-300"
+                      }>{e.type}</span>{" "}
+                      <span className="text-slate-300">{e.text}</span>{" "}
+                      <span className="text-slate-500">{e.at ? new Date(e.at).toLocaleString() : ""}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <button className="mt-2 block text-xs text-slate-400 hover:text-slate-200" onClick={() => toggleNotes(l.id)}>
                 {openNotes === l.id ? "Hide notes" : `Notes${(notes[l.id]?.length ?? 0) ? ` (${notes[l.id].length})` : ""}`}
               </button>
               {openNotes === l.id && (
