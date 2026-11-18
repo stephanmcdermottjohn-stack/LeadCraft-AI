@@ -37,6 +37,22 @@ Response 200:
 - `GET /api/admin/overview` — auth, **admin only** (403 otherwise). Aggregate platform stats: total users, total leads, leads by status/source, 20 most recent businesses with lead counts. Admins never see another business's individual lead rows (privacy rule). Promote via `python scripts/make_admin.py <email> <password>`.
 - Landing page URL: `/l/<slug>` (frontend SPA route); shows the business template's `extra_fields` (generic key/label/type form controls served in the config) when the business enables the toggle.
 
+## Live (AI LeadFlow P0 #1 — lifecycle stages + attribution)
+- Lifecycle `stage` is a SEPARATE axis from CRM `status` (new/contacted/converted/archived). Stages ∈ {capture, qualify, nurture, convert, retain, reactivate}. Every stage change appends to `lead_stage_history` (append-only, never rewritten). Bridge rule: `status=converted` auto-moves stage to `convert` (logged in history); the reverse never happens automatically.
+- `PATCH /api/leads/{id}/stage` — auth, tenant-404. Body `{stage}` from the allowlist; invalid → 400.
+- `GET /api/leads/{id}/stage-history` — auth, tenant-404. Newest-first `[{stage, changed_at, from_crm_status?}]`.
+- Lead list rows now also carry `stage`, `grade`, `assigned_to`, `next_action`, `next_action_at`, `campaign`, `utm_source`, `utm_medium`, `utm_campaign`, `utm_term`, `utm_content`, `landing_url`.
+- Capture attribution: `/api/leads/capture` and `/api/leads/import` read `landing_url` + `utm_*` from the body (and fall back to nested `extra`) and store them on the lead. Landing page passes URL params through automatically.
+
+## Live (AI LeadFlow P0 #2 — ICP builder + explainable fit)
+- ICP profiles are user-scoped; cross-tenant reads/writes → 404. Fit is computed on demand — editing/deleting a profile never rewrites historical data.
+- Fit model (rule-based, transparent): 4 factors — location 25, needs 35, services 25, budget 15. Status per factor ∈ {match, partial, no_match, unknown}. Score = earned ÷ evaluable × 100; **unknown factors never drag a lead down** (they narrow the basis). Grade bands: A ≥ 75, B ≥ 50, C ≥ 30, else D. No evaluable factor → `score: null, grade: ""` ("Not enough information"). Always presented as a heuristic grade, never a calibrated probability.
+- `GET /api/icp/templates` — public. 8 keys: property, education, healthcare, ecommerce, recruitment, saas, professional_services, other.
+- `GET /api/icp` — auth. Own profiles, newest first.
+- `POST /api/icp` — auth, 201. Body: `{name (1–100, required), industry?, company_size?, location?, budget_min?/budget_max? (int, PKR), business_type? (validated key), needs?, preferred_services?, decision_authority?, buying_timeline?, criteria? (≤12 strings, extras dropped), is_default?}`. `budget_min > budget_max` → 400; unknown business_type → 400. `is_default: true` unsets the previous default.
+- `PATCH /api/icp/{id}` / `DELETE /api/icp/{id}` — auth, tenant-404.
+- `POST /api/icp/{id}/match/{lead_id}` — auth, tenant-404 either side. 200 → `{lead_id, profile_id, fit: {score, grade, factors: [{factor, status, detail, points, weight}]}}`. Budget parsing: first number in the lead's `metadata.budget` (accepts "150000", "1.5 crore", "80 lakh" — expanded to raw PKR, no currency conversion; the detail line states the comparison as-is).
+
 ## Ground rules encoded in contracts (Section 0 of the roadmap)
 - Every lead write requires a `source` from the allowlist and a `consent_timestamp`.
 - No endpoint creates outbound-first contact. `messages.direction=in` rows must exist before the bot replies.
