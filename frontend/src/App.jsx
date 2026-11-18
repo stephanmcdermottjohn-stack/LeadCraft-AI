@@ -454,6 +454,144 @@ function IcpEditor() {
   );
 }
 
+function AbEditor() {
+  const [variants, setVariants] = useState([]);
+  const [report, setReport] = useState(null);
+  const [editing, setEditing] = useState(null); // null=list, {}=new, {id}=edit
+  const [error, setError] = useState("");
+  const [msg, setMsg] = useState("");
+
+  const load = () => {
+    api("/api/landing-variants").then((b) => setVariants(b.variants)).catch((e) => setError(e.message));
+    api("/api/landing-variants/report").then(setReport).catch(() => {});
+  };
+  useEffect(load, []);
+
+  const save = async () => {
+    setError(""); setMsg("");
+    try {
+      if (editing.id) {
+        await api(`/api/landing-variants/${editing.id}`, { method: "PATCH", body: JSON.stringify(editing) });
+        setMsg(`Variant ${editing.label} updated.`);
+      } else {
+        await api("/api/landing-variants", { method: "POST", body: JSON.stringify(editing) });
+        setMsg(`Variant ${editing.label} created.`);
+      }
+      setEditing(null);
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message.replace(/^API \d+: /, "") : "Save failed.");
+    }
+  };
+
+  const remove = async (v) => {
+    try {
+      await api(`/api/landing-variants/${v.id}`, { method: "DELETE" });
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Delete failed.");
+    }
+  };
+
+  if (editing) {
+    return (
+      <div className="rounded-xl border border-slate-800 bg-slate-900 p-6 space-y-3 max-w-lg">
+        <h3 className="font-semibold">{editing.id ? `Edit variant ${editing.label}` : "New A/B variant"}</h3>
+        <p className="text-xs text-slate-400">
+          Overrides headline / subtext / button label on your landing page. Blank = keep the business default.
+        </p>
+        {!editing.id && (
+          <label className="block text-sm">Variant label (A/B/C…)
+            <input className="mt-1 w-full rounded-lg bg-slate-800 px-3 py-2" placeholder="e.g. B"
+                   value={editing.label} onChange={(e) => setEditing({ ...editing, label: e.target.value })} />
+          </label>
+        )}
+        <label className="block text-sm">Headline
+          <input className="mt-1 w-full rounded-lg bg-slate-800 px-3 py-2" placeholder="defaults to business name"
+                 value={editing.headline ?? ""} onChange={(e) => setEditing({ ...editing, headline: e.target.value })} />
+        </label>
+        <label className="block text-sm">Subtext
+          <input className="mt-1 w-full rounded-lg bg-slate-800 px-3 py-2" placeholder="defaults to niche · area"
+                 value={editing.subtext ?? ""} onChange={(e) => setEditing({ ...editing, subtext: e.target.value })} />
+        </label>
+        <label className="block text-sm">Button label
+          <input className="mt-1 w-full rounded-lg bg-slate-800 px-3 py-2" placeholder="defaults to 'Request a callback'"
+                 value={editing.cta_label ?? ""} onChange={(e) => setEditing({ ...editing, cta_label: e.target.value })} />
+        </label>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={editing.is_active ?? true}
+                 onChange={(e) => setEditing({ ...editing, is_active: e.target.checked })} />
+          Active (receiving traffic)
+        </label>
+        {error && <p className="text-xs text-red-400">{error}</p>}
+        <div className="flex gap-2">
+          <button className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold hover:bg-sky-500" onClick={save}>Save</button>
+          <button className="rounded-lg bg-slate-800 px-4 py-2 text-sm hover:bg-slate-700" onClick={() => setEditing(null)}>Cancel</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border border-slate-800 bg-slate-900 p-6 space-y-4 max-w-lg">
+      <h3 className="font-semibold">Landing page A/B test</h3>
+      <p className="text-xs text-slate-400">
+        Visitors are split between your defaults (control) and active variants. Traffic is remembered per visitor — no cookies, no personal data.
+      </p>
+      {error && <p className="text-xs text-red-400">{error}</p>}
+      {msg && <p className="text-xs text-emerald-400">{msg}</p>}
+      <ul className="space-y-2 text-sm">
+        <li className="rounded-lg border border-slate-800 bg-slate-950 p-3">
+          <span className="font-semibold">Control</span>
+          <span className="text-xs text-slate-500"> · business defaults (always active)</span>
+        </li>
+        {variants.map((v) => (
+          <li key={v.id} className="rounded-lg border border-slate-800 bg-slate-950 p-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-semibold">{v.label}</span>
+              {!v.is_active && <span className="rounded bg-slate-800 px-2 py-0.5 text-xs">inactive</span>}
+              {v.headline && <span className="text-xs text-slate-400">"{v.headline}"</span>}
+              <div className="ml-auto flex gap-2 text-xs">
+                <button className="text-sky-400 hover:text-sky-300" onClick={() => setEditing({ ...v })}>Edit</button>
+                <button className="text-red-400 hover:text-red-300" onClick={() => remove(v)}>Delete</button>
+              </div>
+            </div>
+          </li>
+        ))}
+        {variants.length === 0 && <li className="text-slate-400 text-sm">No variants yet.</li>}
+      </ul>
+      {report && (
+        <div className="rounded-lg border border-slate-800 bg-slate-950 p-3">
+          <p className="text-xs font-semibold text-slate-300">Report ({report.slug || "no landing page set"})</p>
+          <table className="mt-1 w-full text-xs text-slate-400">
+            <thead><tr className="text-left">
+              <th className="py-1">Arm</th><th>Impr.</th><th>Subs</th><th>Qualified</th><th>Rate</th>
+            </tr></thead>
+            <tbody>
+              {report.arms.map((a) => (
+                <tr key={a.arm}>
+                  <td className="py-1">{a.display}</td>
+                  <td className="text-center">{a.impressions}</td>
+                  <td className="text-center">{a.submissions}</td>
+                  <td className="text-center">{a.qualified}</td>
+                  <td className="text-center">{a.submission_rate_pct === null ? "—" : `${a.submission_rate_pct}%`}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {report.arms.filter((a) => a.note).map((a) => (
+            <p key={a.arm} className="mt-1 text-[10px] text-slate-500">{a.arm}: {a.note}</p>
+          ))}
+        </div>
+      )}
+      <button className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold hover:bg-sky-500"
+              onClick={() => setEditing({ label: "", headline: "", subtext: "", cta_label: "", is_active: true })}>
+        + New variant
+      </button>
+    </div>
+  );
+}
+
 function SettingsPanel({ user, onLogout }) {
   const [settings, setSettings] = useState({ niche: "", target_area: "", brand_voice: "", landing_slug: null, show_property_fields: false, business_type: "" });
   const [slugInput, setSlugInput] = useState("");
@@ -592,6 +730,7 @@ function SettingsPanel({ user, onLogout }) {
         <p className="text-xs text-slate-500">These power the AI content prompts — personalized per business, not generic.</p>
       </div>
       <IcpEditor />
+      <AbEditor />
       <button className="text-sm text-red-400 hover:text-red-300" onClick={onLogout}>
         Log out
       </button>
@@ -624,8 +763,30 @@ function LandingPage({ slug }) {
   })();
 
   useEffect(() => {
-    api(`/api/public/landing/${encodeURIComponent(slug)}`)
-      .then(setConfig)
+    // A/B arm persistence: the visitor keeps the same arm across reloads via
+    // their own localStorage (no cookies). First visit -> server assigns.
+    const key = `lc_ab_${slug}`;
+    let stored = "";
+    try {
+      stored = localStorage.getItem(key) || "";
+    } catch {
+      stored = "";
+    }
+    const q = stored ? `?variant=${encodeURIComponent(stored)}` : "";
+    api(`/api/public/landing/${encodeURIComponent(slug)}${q}`)
+      .then((cfg) => {
+        setConfig(cfg);
+        try {
+          localStorage.setItem(key, cfg.ab_variant || "control");
+        } catch {
+          /* private mode: arm just isn't sticky */
+        }
+        // First-party impression (no PII, no cookies).
+        api(`/api/public/landing/${encodeURIComponent(slug)}/impression`, {
+          method: "POST",
+          body: JSON.stringify({ variant: cfg.ab_variant || "control" }),
+        }).catch(() => {});
+      })
       .catch(() => setConfig(null));
   }, [slug]);
 
@@ -645,6 +806,7 @@ function LandingPage({ slug }) {
           intent_notes: form.intent_notes,
           extra: config.extra_fields?.length ? extra : {},
           ...attribution,
+          landing_variant: config.ab_variant || "control",
           company,
           consent,
         }),
@@ -698,10 +860,12 @@ function LandingPage({ slug }) {
         ) : (
           <form onSubmit={submit} className="space-y-4">
             <div>
-              <h1 className="text-2xl font-bold">{config.business_name}</h1>
+              <h1 className="text-2xl font-bold">
+                {config.variant?.headline || config.business_name}
+              </h1>
               <p className="text-sm text-slate-400">
-                {config.niche || "Quality services"}
-                {config.target_area ? ` · ${config.target_area}` : ""}
+                {config.variant?.subtext ||
+                  `${config.niche || "Quality services"}${config.target_area ? ` · ${config.target_area}` : ""}`}
               </p>
             </div>
             {field("name", "Your name", "Full name")}
@@ -776,7 +940,7 @@ function LandingPage({ slug }) {
               className="w-full rounded-lg bg-sky-600 py-2 text-sm font-semibold hover:bg-sky-500 disabled:opacity-50"
               disabled={busy || !consent}
             >
-              {busy ? "Sending…" : "Request a callback"}
+              {busy ? "Sending…" : (config.variant?.cta_label || "Request a callback")}
             </button>
             <p className="text-[10px] text-slate-500 text-center">Powered by LeadCraft AI</p>
           </form>

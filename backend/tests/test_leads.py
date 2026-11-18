@@ -125,6 +125,9 @@ def test_public_landing_config_display_fields_only(client, owner_headers):
         "show_property_fields": False,
         "business_type": "",
         "extra_fields": [],
+        # P1 A/B: no variants exist -> control served, no override payload.
+        "ab_variant": "control",
+        "variant": None,
     }
     # No credentials, no other fields leak.
     assert "brand_voice" not in body

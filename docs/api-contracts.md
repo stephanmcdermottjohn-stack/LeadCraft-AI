@@ -78,6 +78,14 @@ Response 200:
 - `lead_activities` records timeline events that live outside dedicated tables — CRM status changes (real changes only; setting the same status twice logs nothing) and BANT edits (`BANT updated: <dim>=<value>, ...`). Written by `PATCH /api/leads/{id}/status` and `PATCH /api/leads/{id}/qualification`.
 - Frontend: "Timeline" toggle per lead card with per-type color coding.
 
+## Live (P1 #1 — landing page A/B variants)
+- Variants override **headline / subtext / CTA label** only (blank = inherit business defaults); page structure, consent form, honeypot stay unchanged. The "control" arm is the business defaults (no row). Max 5 variants.
+- `GET /api/landing-variants` / `POST` (201) / `PATCH /{id}` / `DELETE /{id}` — auth, tenant-404. Label: 1–50 chars `[A-Za-z0-9-]`, case-insensitively unique (409), **fixed after creation** (rename refused — it would orphan past traffic), never `control`. Inactive variants keep their historical numbers.
+- `GET /api/public/landing/{slug}` — now assigns an A/B arm: `?variant=` re-serves a specific arm (frontend remembers the visitor's arm in **localStorage `lc_ab_<slug>`, no cookies**); omitted → uniform random among active arms. Response adds `ab_variant: "control"|"<label>"` and `variant: {label, headline, subtext, cta_label} | null`. Unknown arm → 404.
+- `POST /api/public/landing/{slug}/impression` — no-auth, no PII, 204; counts an impression for the stated arm (unknown labels count as control; unknown slugs are silently ignored, no row). One row per page view in `landing_events`.
+- Submissions and qualified leads are NOT double-tracked: computed from `leads.landing_variant` (capture continues to accept it; the landing page now sends the assigned arm automatically).
+- `GET /api/landing-variants/report` — auth. Per arm: `{impressions, submissions, qualified, submission_rate_pct, note}`. Honest missing-data rules: 0 traffic → rate `null` + "conversion rate unknown (not 0%)"; < 30 impressions → rate `null` + "too early to compare arms". `qualified` = lead left `capture` stage OR has a score snapshot.
+
 ## Ground rules encoded in contracts (Section 0 of the roadmap)
 - Every lead write requires a `source` from the allowlist and a `consent_timestamp`.
 - No endpoint creates outbound-first contact. `messages.direction=in` rows must exist before the bot replies.

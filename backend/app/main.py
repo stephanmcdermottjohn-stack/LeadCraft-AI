@@ -12,6 +12,7 @@ from app.api.auth import router as auth_router
 from app.api.content import router as content_router
 from app.api.health import router as health_router
 from app.api.icp import router as icp_router
+from app.api.landing_ab import router as landing_ab_router
 from app.api.leads import router as leads_router
 from app.api.public import router as public_router
 from app.api.qualification import router as qualification_router
@@ -73,6 +74,7 @@ def create_app() -> FastAPI:
     app.include_router(leads_router)
     app.include_router(public_router)
     app.include_router(icp_router)
+    app.include_router(landing_ab_router)
     app.include_router(qualification_router)
     app.include_router(scoring_leads_router)
     app.include_router(scoring_feedback_router)

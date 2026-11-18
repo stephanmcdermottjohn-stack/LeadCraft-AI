@@ -240,6 +240,42 @@ class LeadActivity(Base):
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class LandingVariant(Base):
+    """A/B variant for the auto landing page (P1 #1). Overrides headline /
+    subtext / CTA label only — the page structure and consent form stay
+    template-driven. Empty fields = inherit the control content. The "control"
+    arm is the business defaults (no row)."""
+
+    __tablename__ = "landing_variants"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    label: Mapped[str] = mapped_column(String(50))  # e.g. "B", "C" (control = no row)
+    headline: Mapped[str] = mapped_column(String(300), default="")
+    subtext: Mapped[str] = mapped_column(Text, default="")
+    cta_label: Mapped[str] = mapped_column(String(100), default="")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class LandingEvent(Base):
+    """First-party impression counter for A/B reporting (P1 #1). No cookies,
+    no PII: the variant label the landing page served. Submissions and
+    qualified-lead counts are computed from leads.landing_variant instead of
+    double-tracked here."""
+
+    __tablename__ = "landing_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    slug: Mapped[str] = mapped_column(String(100), index=True)
+    # "control" or the variant label.
+    variant: Mapped[str] = mapped_column(String(50), default="control")
+    # impression today (submission/qualified computed from leads later).
+    event: Mapped[str] = mapped_column(String(50), default="impression")
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class LeadNote(Base):
     """CRM follow-up notes on a lead (Phase 3C). User-scoped; only the lead's
     owner can read/write. Free-form text, timestamped, append-only (no edit/

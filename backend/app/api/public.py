@@ -3,19 +3,40 @@
 Exposes ONLY business-facing display fields — never personal data, never
 credentials, never other clients' rows.
 """
+import random
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.models import ClientSettings, User
+from app.models import ClientSettings, LandingEvent, LandingVariant, User
 from app.services import business_types
 
 router = APIRouter(prefix="/api/public")
 
+CONTROL = "control"
+
+
+def _active_variants(db: Session, user_id: int) -> list[LandingVariant]:
+    return db.scalars(
+        select(LandingVariant)
+        .where(LandingVariant.user_id == user_id, LandingVariant.is_active)
+        .order_by(LandingVariant.id.asc())
+    ).all()
+
+
+def _variant_public(v: LandingVariant) -> dict:
+    return {
+        "label": v.label,
+        "headline": v.headline,
+        "subtext": v.subtext,
+        "cta_label": v.cta_label,
+    }
+
 
 @router.get("/landing/{slug}")
-def landing_config(slug: str, db: Session = Depends(get_db)) -> dict:
+def landing_config(slug: str, variant: str | None = None, db: Session = Depends(get_db)) -> dict:
     row = db.scalar(select(ClientSettings).where(ClientSettings.landing_slug == slug))
     if row is None:
         raise HTTPException(status_code=404, detail="Unknown business page.")
@@ -23,6 +44,26 @@ def landing_config(slug: str, db: Session = Depends(get_db)) -> dict:
     # Phase 3D: the template's extra fields drive the landing form. Shown only
     # when the business enables the toggle; "" type = no extras at all.
     extra_fields = business_types.public_extras(row.business_type or "") if row.show_property_fields else []
+
+    # A/B assignment (P1 #1): explicit ?variant= re-serves that arm (the
+    # frontend remembers the visitor's arm in localStorage); otherwise the
+    # server picks uniformly among the active arms. No active variants →
+    # control, and the variant object is absent.
+    assigned = CONTROL
+    variant_payload = None
+    arms = _active_variants(db, row.user_id)
+    if arms:
+        if variant and variant != CONTROL:
+            chosen = next((a for a in arms if a.label == variant), None)
+            if chosen is None:
+                raise HTTPException(status_code=404, detail="Unknown variant for this page.")
+            assigned, variant_payload = chosen.label, _variant_public(chosen)
+        elif variant == CONTROL:
+            assigned = CONTROL
+        else:
+            chosen = random.choice(arms)
+            assigned, variant_payload = chosen.label, _variant_public(chosen)
+
     return {
         "slug": slug,
         "business_name": user.business_name if user else "",
@@ -31,4 +72,24 @@ def landing_config(slug: str, db: Session = Depends(get_db)) -> dict:
         "show_property_fields": bool(row.show_property_fields),
         "business_type": row.business_type or "",
         "extra_fields": extra_fields,
+        "ab_variant": assigned,
+        "variant": variant_payload,
     }
+
+
+@router.post("/landing/{slug}/impression", status_code=204)
+def log_impression(slug: str, body: dict | None = None, db: Session = Depends(get_db)) -> None:
+    """First-party impression counter: no cookies, no PII, no read access.
+    Unknown slugs are counted as nothing (404 would leak slug existence —
+    the config endpoint already does that publicly anyway, but here we keep
+    it silent and cheap)."""
+    row = db.scalar(select(ClientSettings).where(ClientSettings.landing_slug == slug))
+    if row is None:
+        return
+    variant = CONTROL
+    if isinstance(body, dict):
+        candidate = str(body.get("variant", "") or "")
+        if candidate == CONTROL or any(a.label == candidate for a in _active_variants(db, row.user_id)):
+            variant = candidate
+    db.add(LandingEvent(user_id=row.user_id, slug=slug, variant=variant, event="impression"))
+    db.commit()
