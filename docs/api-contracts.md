@@ -60,6 +60,19 @@ Response 200:
 - `suggestion` guidance: 0 known → "" (unknown-first); partial → "Still unknown: <dims> - ask on the next contact."; all 4 → "BANT complete - if the lead is a good ICP fit, move it to nurture with a follow-up plan." (mirrors the lifecycle default next-action wording; no state is forced).
 - Frontend: inline BANT editor per lead card (per-dimension known/unknown labels, blank = unknown, completeness badge `BANT (n/4 known)`).
 
+## Live (AI LeadFlow P0 #5 — engagement scoring + grade snapshotting)
+- **Score ≠ grade.** Score = heuristic engagement number (labeled "heuristic engagement score — not a calibrated probability"); grade = ICP-fit snapshot (A–D, "" when nothing evaluable). Each `POST score` appends a snapshot; history rows are never recomputed — ICP edits or weight changes cannot rewrite the past.
+- Weights (`clients_settings.scoring_weights_json`, defaults shown; user-editable via `PATCH /api/settings` `scoring_weights` — unknown keys dropped, values clamped 0..100, no 422):
+  - `consent_base: 10` — every consented lead starts here
+  - `per_note: 3` — per follow-up note, first 5 counted (max 15)
+  - `per_bant_known: 5` — per known BANT dimension (max 20); unknown dims earn nothing, never penalized
+  - `budget_stated: 10` — lead gave a parseable budget in template extras
+  - stage: `capture: 0`, `qualify: 5`, `nurture: 10`, `convert: 15`, `retain: 15`, `reactivate: 5`
+- `POST /api/leads/{id}/score` — auth, tenant-404. Optional body `{weights: {...}}` for a one-off override (stored settings unchanged). Returns `{score, grade, label, factors: [{signal, points, weight, detail}], weights_used, history_count}`; also updates `leads.score`/`leads.grade` to the latest snapshot. Empty body allowed.
+- `GET /api/leads/{id}/score-history` — auth, tenant-404. Newest-first snapshots `{id, score, grade, reason: {label, weights, factors}, created_at}`.
+- `GET /api/scoring/feedback` — auth. Recalibration hook: `{converted_count, avg_score_converted, avg_score_other, ready_for_recalibration, note}`. Honest: below 5 converted leads with snapshots it explicitly says no recalibration is suggested; even when ready, recalibration stays a human decision (no auto weight changes).
+- Frontend: "⚡ Score lead" button per card with inline factor breakdown + snapshot count.
+
 ## Ground rules encoded in contracts (Section 0 of the roadmap)
 - Every lead write requires a `source` from the allowlist and a `consent_timestamp`.
 - No endpoint creates outbound-first contact. `messages.direction=in` rows must exist before the bot replies.

@@ -55,6 +55,11 @@ class ClientSettings(Base):
     # Phase 3D: which business template drives the landing form extras
     # (property, ecommerce, hospitality, ...). "" = general.
     business_type: Mapped[str] = mapped_column(String(50), default="")
+    # P0 #5: per-user engagement-score weights (flat dict of ints, JSON).
+    # "" = use services.scoring.DEFAULT_WEIGHTS. Editable freely; changing
+    # weights never rewrites old snapshots (each history row keeps its own
+    # reason breakdown).
+    scoring_weights_json: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     user: Mapped[User] = relationship(back_populates="settings")
@@ -198,6 +203,24 @@ class LeadQualification(Base):
     updated_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     lead: Mapped[Lead] = relationship(back_populates="qualification")
+
+
+class LeadScoreHistory(Base):
+    """Append-only engagement-score + grade snapshots (roadmap P0 #5).
+    Historical rows are never recomputed: ICP edits or weight changes must not
+    rewrite the past — each row keeps the full factor breakdown it was scored
+    with (reason_json). The grade is the ICP-fit snapshot at score time."""
+
+    __tablename__ = "lead_score_history"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    lead_id: Mapped[int] = mapped_column(ForeignKey("leads.id"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    score: Mapped[int] = mapped_column(Integer)
+    grade: Mapped[str] = mapped_column(String(2), default="")  # ICP-fit snapshot (A-D, "" = unknown)
+    # Full explanation: {label, weights: {...}, factors: [{signal, points, weight, detail}]}.
+    reason_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class LeadNote(Base):

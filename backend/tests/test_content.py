@@ -81,7 +81,10 @@ def test_generate_uses_client_settings_not_business_name_only(client, auth_heade
 
 def test_settings_roundtrip(client, auth_headers):
     empty = client.get("/api/settings", headers=auth_headers).json()["settings"]
-    assert empty == {"niche": "", "target_area": "", "brand_voice": "", "landing_slug": None, "show_property_fields": False, "business_type": ""}
+    expected = {"niche": "", "target_area": "", "brand_voice": "", "landing_slug": None, "show_property_fields": False, "business_type": ""}
+    # scoring_weights (P0 #5) rides along with defaults when unset.
+    assert {k: empty[k] for k in expected} == expected
+    assert empty["scoring_weights"]["consent_base"] == 10
     res = client.patch(
         "/api/settings",
         json={"niche": "salon", "target_area": "DHA", "brand_voice": "premium"},

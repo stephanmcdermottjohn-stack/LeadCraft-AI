@@ -1,4 +1,5 @@
 """Client settings routes — the personalization source for content prompts."""
+import json
 import re
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -10,6 +11,7 @@ from app.api.auth import get_current_user
 from app.db import get_db
 from app.models import ClientSettings, User
 from app.services import business_types
+from app.services import scoring as scoring_service
 
 router = APIRouter(prefix="/api/settings")
 
@@ -31,6 +33,9 @@ class SettingsBody(BaseModel):
     # Phase 3D business template (property / ecommerce / hospitality / ...).
     # "" = general. Must match a template key; 400 otherwise.
     business_type: str | None = Field(default=None, max_length=50)
+    # P0 #5: engagement-score weights. Omitted = keep; {} = reset to defaults.
+    # Unknown keys are dropped; values clamped to 0..100 (never a 422 surprise).
+    scoring_weights: dict[str, int] | None = None
 
 
 def _slugify(text: str) -> str:
@@ -51,6 +56,7 @@ def _public(s: ClientSettings) -> dict:
         "landing_slug": s.landing_slug,
         "show_property_fields": bool(s.show_property_fields),
         "business_type": s.business_type or "",
+        "scoring_weights": scoring_service.effective_weights(s),
     }
 
 
@@ -112,6 +118,10 @@ def update_settings(body: SettingsBody, user: User = Depends(get_current_user), 
                 detail=f"Unknown business_type. Valid: {sorted(business_types.BUSINESS_TYPES)}",
             )
         row.business_type = value
+
+    if body.scoring_weights is not None:
+        sanitized = scoring_service.sanitize_weights(body.scoring_weights)
+        row.scoring_weights_json = json.dumps(sanitized)
 
     db.commit()
     return {"settings": _public(row)}

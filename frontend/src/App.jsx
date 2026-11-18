@@ -942,6 +942,19 @@ function LeadsPanel() {
     }
   };
 
+  // Engagement scoring (heuristic, transparent) + ICP grade snapshot.
+  const [scores, setScores] = useState({});
+  const runScore = async (id) => {
+    setError("");
+    try {
+      const b = await api(`/api/leads/${id}/score`, { method: "POST" });
+      setScores((s) => ({ ...s, [id]: b }));
+      loadLeads();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Scoring failed.");
+    }
+  };
+
   const mdLine = (md) => {
     const entries = Object.entries(md ?? {}).filter(([, v]) => String(v).trim());
     if (!entries.length) return "";
@@ -1184,6 +1197,27 @@ function LeadsPanel() {
                     <button className="rounded bg-violet-700 px-3 py-1 hover:bg-violet-600" onClick={() => saveBant(l.id)}>
                       Save BANT
                     </button>
+                  </div>
+                )}
+              </div>
+              <div className="mt-2">
+                <button className="text-xs text-amber-300 hover:text-amber-200" onClick={() => runScore(l.id)}>
+                  {scores[l.id] ? "Re-score lead" : `⚡ Score lead${l.score ? ` (last: ${l.score})` : ""}`}
+                </button>
+                {scores[l.id] && (
+                  <div className="mt-1 rounded border border-slate-800 bg-slate-900 p-2 text-xs">
+                    <p className="font-semibold">
+                      Score {scores[l.id].score} · grade {scores[l.id].grade || "—"}
+                      {scores[l.id].history_count ? ` · ${scores[l.id].history_count} snapshots` : ""}
+                    </p>
+                    <p className="text-slate-500">{scores[l.id].label}</p>
+                    <ul className="mt-1 space-y-0.5 text-slate-400">
+                      {scores[l.id].factors.map((f) => (
+                        <li key={f.signal}>
+                          <span className={f.points > 0 ? "text-emerald-400" : "text-slate-500"}>+{f.points}</span> {f.signal}: {f.detail}
+                        </li>
+                      ))}
+                    </ul>
                   </div>
                 )}
               </div>
