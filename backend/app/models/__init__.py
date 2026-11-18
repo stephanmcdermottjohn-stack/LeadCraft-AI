@@ -276,6 +276,58 @@ class LandingEvent(Base):
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class NurtureCampaign(Base):
+    """Consent-gated drip campaign (P1 #2). Steps are a simple script:
+    [{day_offset: days after enrollment, message: the touch text}]. No
+    external provider sends anything (zero-cost rule): a due step becomes the
+    lead's next_action + a timeline activity, so the owner executes the touch.
+    Consent gate: enrollment is only possible for leads with a recorded
+    consent_timestamp and never for suppressed contacts."""
+
+    __tablename__ = "nurture_campaigns"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    name: Mapped[str] = mapped_column(String(100))
+    # JSON array of {day_offset, message}; validated at the API layer.
+    steps_json: Mapped[str] = mapped_column(Text, default="[]")
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class NurtureEnrollment(Base):
+    """One lead's place in one campaign. Unique per (campaign, lead)."""
+
+    __tablename__ = "nurture_enrollments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    campaign_id: Mapped[int] = mapped_column(ForeignKey("nurture_campaigns.id"), index=True)
+    lead_id: Mapped[int] = mapped_column(ForeignKey("leads.id"), index=True)
+    # active | completed | stopped | suppressed
+    status: Mapped[str] = mapped_column(String(20), default="active")
+    steps_total: Mapped[int] = mapped_column(Integer, default=0)  # snapshot at enroll
+    current_step: Mapped[int] = mapped_column(Integer, default=0)  # steps surfaced so far
+    enrolled_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    next_step_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class NurtureSuppression(Base):
+    """Per-user do-not-nurture list by phone or email (P1 #2). Consent-gated
+    design: a suppressed contact is never enrolled, and enrolling a suppressed
+    lead records the enrollment as 'suppressed' instead of active."""
+
+    __tablename__ = "nurture_suppressions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    # Normalized contact value: phone digits or lowercased email.
+    value: Mapped[str] = mapped_column(String(320), index=True)
+    reason: Mapped[str] = mapped_column(String(200), default="")
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class LeadNote(Base):
     """CRM follow-up notes on a lead (Phase 3C). User-scoped; only the lead's
     owner can read/write. Free-form text, timestamped, append-only (no edit/

@@ -465,7 +465,9 @@ function AbEditor() {
     api("/api/landing-variants").then((b) => setVariants(b.variants)).catch((e) => setError(e.message));
     api("/api/landing-variants/report").then(setReport).catch(() => {});
   };
-  useEffect(load, []);
+  useEffect(() => {
+    load();
+  }, []);
 
   const save = async () => {
     setError(""); setMsg("");
@@ -587,6 +589,131 @@ function AbEditor() {
       <button className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold hover:bg-sky-500"
               onClick={() => setEditing({ label: "", headline: "", subtext: "", cta_label: "", is_active: true })}>
         + New variant
+      </button>
+    </div>
+  );
+}
+
+function NurtureEditor() {
+  const [campaigns, setCampaigns] = useState([]);
+  const [editing, setEditing] = useState(null); // null=list, {id?, name, steps, active}
+  const [error, setError] = useState("");
+  const [msg, setMsg] = useState("");
+
+  const load = () => api("/api/nurture/campaigns").then((b) => setCampaigns(b.campaigns)).catch((e) => setError(e.message));
+  useEffect(() => {
+    load();
+  }, []);
+
+  const save = async () => {
+    setError(""); setMsg("");
+    try {
+      const payload = { name: editing.name, steps: editing.steps, active: editing.active };
+      if (editing.id) {
+        await api(`/api/nurture/campaigns/${editing.id}`, { method: "PATCH", body: JSON.stringify(payload) });
+        setMsg(`Campaign "${editing.name}" updated.`);
+      } else {
+        await api("/api/nurture/campaigns", { method: "POST", body: JSON.stringify(payload) });
+        setMsg(`Campaign "${editing.name}" created.`);
+      }
+      setEditing(null);
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message.replace(/^API \d+: /, "") : "Save failed.");
+    }
+  };
+
+  const remove = async (c) => {
+    try {
+      await api(`/api/nurture/campaigns/${c.id}`, { method: "DELETE" });
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message.replace(/^API \d+: /, "") : "Delete failed.");
+    }
+  };
+
+  if (editing) {
+    const setStep = (i, key, value) => {
+      const steps = editing.steps.map((s, j) => (j === i ? { ...s, [key]: value } : s));
+      setEditing({ ...editing, steps });
+    };
+    return (
+      <div className="rounded-xl border border-slate-800 bg-slate-900 p-6 space-y-3 max-w-lg">
+        <h3 className="font-semibold">{editing.id ? `Edit campaign` : "New nurture campaign"}</h3>
+        <label className="block text-sm">Campaign name
+          <input className="mt-1 w-full rounded-lg bg-slate-800 px-3 py-2" value={editing.name}
+                 onChange={(e) => setEditing({ ...editing, name: e.target.value })} />
+        </label>
+        <p className="text-xs text-slate-400">
+          Steps are touch scripts — the due step becomes the lead's "next action" on the dashboard. Nothing is auto-sent.
+        </p>
+        {editing.steps.map((s, i) => (
+          <div key={i} className="flex gap-2 items-end">
+            <label className="text-sm w-28">
+              Day
+              <input type="number" min="0" max="365" className="mt-1 w-full rounded-lg bg-slate-800 px-2 py-2"
+                     value={s.day_offset} onChange={(e) => setStep(i, "day_offset", Number(e.target.value))} />
+            </label>
+            <label className="text-sm flex-1">
+              Touch message
+              <input className="mt-1 w-full rounded-lg bg-slate-800 px-3 py-2" placeholder="e.g. Intro call: ask about the event date"
+                     value={s.message} onChange={(e) => setStep(i, "message", e.target.value)} />
+            </label>
+            {editing.steps.length > 1 && (
+              <button className="text-xs text-red-400 pb-2" onClick={() => setEditing({ ...editing, steps: editing.steps.filter((_, j) => j !== i) })}>✕</button>
+            )}
+          </div>
+        ))}
+        <button className="text-xs text-sky-400 hover:text-sky-300"
+                onClick={() => setEditing({ ...editing, steps: [...editing.steps, { day_offset: 0, message: "" }] })}>
+          + Add step
+        </button>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={editing.active ?? true}
+                 onChange={(e) => setEditing({ ...editing, active: e.target.checked })} />
+          Active (accepting enrollments)
+        </label>
+        {error && <p className="text-xs text-red-400">{error}</p>}
+        <div className="flex gap-2">
+          <button className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold hover:bg-sky-500" onClick={save}>Save</button>
+          <button className="rounded-lg bg-slate-800 px-4 py-2 text-sm hover:bg-slate-700" onClick={() => setEditing(null)}>Cancel</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border border-slate-800 bg-slate-900 p-6 space-y-4 max-w-lg">
+      <h3 className="font-semibold">Nurture campaigns</h3>
+      <p className="text-xs text-slate-400">
+        Consent-gated follow-up sequences. Due touches appear as the lead's next action and timeline — nothing is auto-sent. Suppressed contacts are never enrolled.
+      </p>
+      {error && <p className="text-xs text-red-400">{error}</p>}
+      {msg && <p className="text-xs text-emerald-400">{msg}</p>}
+      <ul className="space-y-2">
+        {campaigns.map((c) => (
+          <li key={c.id} className="rounded-lg border border-slate-800 bg-slate-950 p-3 text-sm">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-semibold">{c.name}</span>
+              {!c.active && <span className="rounded bg-slate-800 px-2 py-0.5 text-xs">inactive</span>}
+              <div className="ml-auto flex gap-2 text-xs">
+                <button className="text-sky-400 hover:text-sky-300" onClick={() => setEditing({ ...c })}>Edit</button>
+                <button className="text-red-400 hover:text-red-300" onClick={() => remove(c)}>Delete</button>
+              </div>
+            </div>
+            <p className="mt-1 text-xs text-slate-500">
+              {c.steps.length} step(s) · {c.metrics ? `${c.metrics.active} active · ${c.metrics.completed} completed · ${c.metrics.suppressed} suppressed` : ""}
+            </p>
+            <p className="text-xs text-slate-400">
+              {c.steps.map((s) => `D+${s.day_offset}: ${s.message}`).join(" · ")}
+            </p>
+          </li>
+        ))}
+        {campaigns.length === 0 && <li className="text-sm text-slate-400">No campaigns yet.</li>}
+      </ul>
+      <button className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold hover:bg-sky-500"
+              onClick={() => setEditing({ name: "", steps: [{ day_offset: 0, message: "" }], active: true })}>
+        + New campaign
       </button>
     </div>
   );
@@ -731,6 +858,7 @@ function SettingsPanel({ user, onLogout }) {
       </div>
       <IcpEditor />
       <AbEditor />
+      <NurtureEditor />
       <button className="text-sm text-red-400 hover:text-red-300" onClick={onLogout}>
         Log out
       </button>
@@ -1136,6 +1264,57 @@ function LeadsPanel() {
     }
   };
 
+  // Nurture: enroll this lead in a campaign / manage its enrollment.
+  const [nurtureCampaigns, setNurtureCampaigns] = useState([]);
+  const [openNurture, setOpenNurture] = useState(null); // lead id
+  const [nurtureEnrollments, setNurtureEnrollments] = useState({});
+  const [nurturePick, setNurturePick] = useState("");
+  const [nurtureMsg, setNurtureMsg] = useState("");
+
+  const toggleNurture = async (id) => {
+    if (openNurture === id) {
+      setOpenNurture(null);
+      return;
+    }
+    setNurtureMsg("");
+    setNurturePick("");
+    try {
+      const camps = await api("/api/nurture/campaigns");
+      setNurtureCampaigns(camps.campaigns.filter((c) => c.active));
+      const enrolls = await api(`/api/nurture/enrollments`);
+      const mine = {};
+      for (const e of enrolls.enrollments) {
+        if (!mine[e.lead_id] || e.status === "active") mine[e.lead_id] = e;
+      }
+      setNurtureEnrollments((s) => ({ ...s, ...mine }));
+      setOpenNurture(id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Nurture load failed.");
+    }
+  };
+
+  const enrollNurture = async (leadId) => {
+    if (!nurturePick) return;
+    try {
+      const b = await api(`/api/nurture/campaigns/${nurturePick}/enroll`, { method: "POST", body: JSON.stringify({ lead_id: leadId }) });
+      setNurtureEnrollments((s) => ({ ...s, [leadId]: b.enrollment }));
+      setNurtureMsg(b.outcome === "suppressed" ? "Contact is on the suppression list - not enrolled." : "Enrolled.");
+    } catch (err) {
+      setNurtureMsg(err instanceof Error ? err.message.replace(/^API \d+: /, "") : "Enroll failed.");
+    }
+  };
+
+  const stopNurture = async (leadId) => {
+    const e = nurtureEnrollments[leadId];
+    if (!e) return;
+    try {
+      const b = await api(`/api/nurture/enrollments/${e.id}/stop`, { method: "POST" });
+      setNurtureEnrollments((s) => ({ ...s, [leadId]: b.enrollment }));
+    } catch (err) {
+      setNurtureMsg(err instanceof Error ? err.message.replace(/^API \d+: /, "") : "Stop failed.");
+    }
+  };
+
   const mdLine = (md) => {
     const entries = Object.entries(md ?? {}).filter(([, v]) => String(v).trim());
     if (!entries.length) return "";
@@ -1406,6 +1585,54 @@ function LeadsPanel() {
               <button className="mt-2 text-xs text-sky-300 hover:text-sky-200" onClick={() => toggleTimeline(l.id)}>
                 {openTimeline === l.id ? "Hide timeline" : "Timeline"}
               </button>
+              <button className="mt-2 ml-3 text-xs text-rose-300 hover:text-rose-200" onClick={() => toggleNurture(l.id)}>
+                {openNurture === l.id ? "Hide nurture" : "Nurture"}
+              </button>
+              {openNurture === l.id && (
+                <div className="mt-1 rounded border border-slate-800 bg-slate-900 p-2 text-xs space-y-2">
+                  {nurtureEnrollments[l.id] && (
+                    <p className="text-slate-300">
+                      {nurtureEnrollments[l.id].status === "active"
+                        ? `Active · step ${nurtureEnrollments[l.id].current_step}/${nurtureEnrollments[l.id].steps_total}`
+                        : `Status: ${nurtureEnrollments[l.id].status}`}
+                      {nurtureEnrollments[l.id].next_step_at && nurtureEnrollments[l.id].status === "active" && (
+                        <> · next touch {new Date(nurtureEnrollments[l.id].next_step_at).toLocaleDateString()}</>
+                      )}
+                      {nurtureEnrollments[l.id].status === "active" && (
+                        <button className="ml-2 text-rose-300 hover:text-rose-200" onClick={() => stopNurture(l.id)}>Stop sequence</button>
+                      )}
+                    </p>
+                  )}
+                  {nurtureCampaigns.length > 0 ? (
+                    <div className="flex gap-2 items-center">
+                      <select className="rounded bg-slate-800 px-2 py-1" value={nurturePick}
+                              onChange={(e) => setNurturePick(e.target.value)}>
+                        <option value="">Choose campaign…</option>
+                        {nurtureCampaigns.map((c) => (
+                          <option key={c.id} value={c.id}>{c.name} ({c.steps.length} steps)</option>
+                        ))}
+                      </select>
+                      <button className="rounded bg-rose-800 px-3 py-1 hover:bg-rose-700" onClick={() => enrollNurture(l.id)}>
+                        Enroll
+                      </button>
+                      <button className="rounded bg-slate-800 px-3 py-1 text-slate-300 hover:bg-slate-700" title="Surface any due nurture touches right now"
+                              onClick={async () => {
+                                try {
+                                  const b = await api("/api/nurture/process-due", { method: "POST" });
+                                  setNurtureMsg(`${b.steps_surfaced} touch(es) due right now.`);
+                                } catch (err) {
+                                  setNurtureMsg(err instanceof Error ? err.message.replace(/^API \d+: /, "") : "Run failed.");
+                                }
+                              }}>
+                        Check due
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="text-slate-500">No active campaigns — create one in Settings → Nurture campaigns.</p>
+                  )}
+                  {nurtureMsg && <p className="text-slate-400">{nurtureMsg}</p>}
+                </div>
+              )}
               {openTimeline === l.id && (
                 <ul className="mt-1 space-y-1 border-t border-slate-800 pt-2">
                   {(timelines[l.id] ?? []).map((e, i) => (

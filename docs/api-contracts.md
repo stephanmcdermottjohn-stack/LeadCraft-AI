@@ -86,6 +86,16 @@ Response 200:
 - Submissions and qualified leads are NOT double-tracked: computed from `leads.landing_variant` (capture continues to accept it; the landing page now sends the assigned arm automatically).
 - `GET /api/landing-variants/report` — auth. Per arm: `{impressions, submissions, qualified, submission_rate_pct, note}`. Honest missing-data rules: 0 traffic → rate `null` + "conversion rate unknown (not 0%)"; < 30 impressions → rate `null` + "too early to compare arms". `qualified` = lead left `capture` stage OR has a score snapshot.
 
+## Live (P1 #2 — nurture workflows v1)
+- **Honest scope: nothing is auto-sent.** A due touch surfaces as the lead's `next_action` (+ `next_action_at`) and a `nurture` timeline activity — the owner executes the touch. Zero external cost; email/SMS delivery stays deferred.
+- Consent gate: enrollment requires the lead's recorded `consent_timestamp`; a contact on the user's suppression list enrolls as `suppressed` (never active). One enrollment per (campaign, lead) — duplicate → 409.
+- `GET/POST /api/nurture/campaigns`, `PATCH/DELETE /api/nurture/campaigns/{id}` — auth, tenant-404. Steps: 1–8 × `{day_offset: 0–365, message: 1–500}`; invalid → 400. Inactive campaigns refuse enrollment (400). Delete blocked while ANY enrollment exists (any status — history integrity); deactivate instead.
+- `POST /api/nurture/campaigns/{id}/enroll` `{lead_id}` → 201 `{enrollment, outcome: active|suppressed}`. `GET /api/nurture/enrollments?campaign_id=` lists with lead names. `POST /api/nurture/enrollments/{id}/stop` → `stopped` (+ activity).
+- Step timing: step *i* is due at `enrolled_at + steps[i].day_offset` (UTC). `POST /api/nurture/process-due` surfaces every already-passed step in order (catch-up), advances `current_step`, sets the lead's next action, logs activities, and completes the sequence after the last step. The scheduler worker runs the same pass globally every 60s.
+- `GET/POST /api/nurture/suppressions`, `DELETE /{id}` — per-user do-not-nurture list by phone or email (normalized, duplicate → 409). Enrollment-time matching: phone (spaces stripped) or email.
+- `GET /api/nurture/campaigns` includes per-campaign `metrics` (`enrolled_total`, `active`, `completed`, `stopped`, `suppressed`, `touches_surfaced` + honest note).
+- Frontend: Settings "Nurture campaigns" editor (steps rows: day + message); per-lead "Nurture" panel (choose campaign → Enroll, enrollment status, Stop, "Check due" runs the pass on demand).
+
 ## Ground rules encoded in contracts (Section 0 of the roadmap)
 - Every lead write requires a `source` from the allowlist and a `consent_timestamp`.
 - No endpoint creates outbound-first contact. `messages.direction=in` rows must exist before the bot replies.
