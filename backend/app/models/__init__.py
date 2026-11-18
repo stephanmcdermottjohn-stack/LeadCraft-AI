@@ -116,6 +116,7 @@ class Lead(Base):
     conversations: Mapped[list["Conversation"]] = relationship(back_populates="lead")
     notes: Mapped[list["LeadNote"]] = relationship(back_populates="lead")
     stage_history: Mapped[list["LeadStageHistory"]] = relationship(back_populates="lead")
+    qualification: Mapped["LeadQualification"] = relationship(back_populates="lead", uselist=False)
 
 
 class LeadStageHistory(Base):
@@ -163,6 +164,40 @@ class IcpProfile(Base):
     criteria_json: Mapped[str] = mapped_column(Text, default="[]")
     is_default: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class LeadQualification(Base):
+    """BANT qualification (roadmap P0 #3). Unknown-first: every dimension
+    starts with confidence='unknown' and only becomes 'known' when a value is
+    explicitly recorded with its source ('manual' today, 'ai' later).
+    'Unknown' is a first-class answer — values are never invented. One row per
+    lead, created lazily on first PATCH."""
+
+    __tablename__ = "lead_qualifications"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    lead_id: Mapped[int] = mapped_column(ForeignKey("leads.id"), unique=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    # Budget: what the customer can/will spend (free text + parsed number kept
+    # in value; honest free text, no forced format).
+    budget_value: Mapped[str] = mapped_column(String(500), default="")
+    budget_confidence: Mapped[str] = mapped_column(String(20), default="unknown")  # known | unknown
+    budget_source: Mapped[str] = mapped_column(String(20), default="")             # manual | ai
+    # Authority: is this person the decision maker?
+    authority_value: Mapped[str] = mapped_column(String(500), default="")
+    authority_confidence: Mapped[str] = mapped_column(String(20), default="unknown")
+    authority_source: Mapped[str] = mapped_column(String(20), default="")
+    # Need: what they actually want.
+    need_value: Mapped[str] = mapped_column(String(500), default="")
+    need_confidence: Mapped[str] = mapped_column(String(20), default="unknown")
+    need_source: Mapped[str] = mapped_column(String(20), default="")
+    # Timing: when they intend to buy.
+    timing_value: Mapped[str] = mapped_column(String(500), default="")
+    timing_confidence: Mapped[str] = mapped_column(String(20), default="unknown")
+    timing_source: Mapped[str] = mapped_column(String(20), default="")
+    updated_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    lead: Mapped[Lead] = relationship(back_populates="qualification")
 
 
 class LeadNote(Base):

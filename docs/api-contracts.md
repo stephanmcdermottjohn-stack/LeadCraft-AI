@@ -53,6 +53,13 @@ Response 200:
 - `PATCH /api/icp/{id}` / `DELETE /api/icp/{id}` — auth, tenant-404.
 - `POST /api/icp/{id}/match/{lead_id}` — auth, tenant-404 either side. 200 → `{lead_id, profile_id, fit: {score, grade, factors: [{factor, status, detail, points, weight}]}}`. Budget parsing: first number in the lead's `metadata.budget` (accepts "150000", "1.5 crore", "80 lakh" — expanded to raw PKR, no currency conversion; the detail line states the comparison as-is).
 
+## Live (AI LeadFlow P0 #3 — BANT qualification, unknown-first)
+- One `lead_qualifications` row per lead, created lazily on first PATCH. Every dimension (budget / authority / need / timing) carries `{value, confidence: known|unknown, source: manual|ai}`. **Unknown is a first-class answer** — a value is only 'known' when explicitly recorded with its source; nothing is ever inferred or invented.
+- `GET /api/leads/{id}/qualification` — auth, tenant-404. Returns `{qualification: {dimensions, complete: <0..4>, total: 4, suggestion, updated_at}}`; leads without a row get the all-unknown shape (and NO row is created by reading).
+- `PATCH /api/leads/{id}/qualification` — auth, tenant-404. Body: any subset `{budget?, authority?, need?, timing?}` as free text ≤500 chars (whitespace/empty resets that dimension to unknown; >500 → 422; empty body → 400). Source stamps `manual` (AI-sourced edits arrive later via their own path). `complete` honestly reports N of 4 known.
+- `suggestion` guidance: 0 known → "" (unknown-first); partial → "Still unknown: <dims> - ask on the next contact."; all 4 → "BANT complete - if the lead is a good ICP fit, move it to nurture with a follow-up plan." (mirrors the lifecycle default next-action wording; no state is forced).
+- Frontend: inline BANT editor per lead card (per-dimension known/unknown labels, blank = unknown, completeness badge `BANT (n/4 known)`).
+
 ## Ground rules encoded in contracts (Section 0 of the roadmap)
 - Every lead write requires a `source` from the allowlist and a `consent_timestamp`.
 - No endpoint creates outbound-first contact. `messages.direction=in` rows must exist before the bot replies.

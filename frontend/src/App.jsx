@@ -907,6 +907,41 @@ function LeadsPanel() {
     }
   };
 
+  // BANT qualification (unknown-first): open = load the lead's current state.
+  const [bants, setBants] = useState({});
+  const [openBant, setOpenBant] = useState(null);
+  const [bantDraft, setBantDraft] = useState(null);
+
+  const toggleBant = async (id) => {
+    if (openBant === id) {
+      setOpenBant(null);
+      return;
+    }
+    try {
+      const b = await api(`/api/leads/${id}/qualification`);
+      const dims = b.qualification.dimensions;
+      setBants((s) => ({ ...s, [id]: b.qualification }));
+      setBantDraft({
+        budget: dims.budget.value, authority: dims.authority.value,
+        need: dims.need.value, timing: dims.timing.value,
+      });
+      setOpenBant(id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "BANT load failed.");
+    }
+  };
+
+  const saveBant = async (id) => {
+    try {
+      const b = await api(`/api/leads/${id}/qualification`, { method: "PATCH", body: JSON.stringify(bantDraft) });
+      setBants((s) => ({ ...s, [id]: b.qualification }));
+      setBantDraft(null);
+      setOpenBant(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "BANT save failed.");
+    }
+  };
+
   const mdLine = (md) => {
     const entries = Object.entries(md ?? {}).filter(([, v]) => String(v).trim());
     if (!entries.length) return "";
@@ -1122,6 +1157,36 @@ function LeadsPanel() {
                   )}
                 </div>
               )}
+              <div className="mt-2">
+                <button className="text-xs text-violet-300 hover:text-violet-200" onClick={() => toggleBant(l.id)}>
+                  {openBant === l.id ? "Hide BANT" : `BANT${bants[l.id] ? ` (${bants[l.id].complete}/4 known)` : ""}`}
+                </button>
+                {openBant === l.id && bantDraft && bants[l.id] && (
+                  <div className="mt-1 rounded border border-slate-800 bg-slate-900 p-2 text-xs space-y-2">
+                    <p className="text-slate-400">
+                      {bants[l.id].complete}/4 known
+                      {bants[l.id].suggestion ? ` · ${bants[l.id].suggestion}` : " · 'Unknown' is a valid answer — never invent values."}
+                    </p>
+                    {["budget", "authority", "need", "timing"].map((d) => (
+                      <label key={d} className="block">
+                        <span className={bants[l.id].dimensions[d].confidence === "known" ? "text-emerald-400" : "text-slate-500"}>
+                          {d[0].toUpperCase() + d.slice(1)}
+                          {bants[l.id].dimensions[d].confidence === "unknown" ? " (unknown)" : ` · ${bants[l.id].dimensions[d].source}`}
+                        </span>
+                        <input
+                          className="mt-0.5 w-full rounded bg-slate-800 px-2 py-1"
+                          placeholder="leave blank = unknown"
+                          value={bantDraft[d]}
+                          onChange={(e) => setBantDraft({ ...bantDraft, [d]: e.target.value })}
+                        />
+                      </label>
+                    ))}
+                    <button className="rounded bg-violet-700 px-3 py-1 hover:bg-violet-600" onClick={() => saveBant(l.id)}>
+                      Save BANT
+                    </button>
+                  </div>
+                )}
+              </div>
               {l.intent_notes && <p className="mt-1 text-slate-400 whitespace-pre-wrap">{l.intent_notes}</p>}
               <button className="mt-2 text-xs text-slate-400 hover:text-slate-200" onClick={() => toggleNotes(l.id)}>
                 {openNotes === l.id ? "Hide notes" : `Notes${(notes[l.id]?.length ?? 0) ? ` (${notes[l.id].length})` : ""}`}
