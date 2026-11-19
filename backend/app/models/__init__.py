@@ -12,7 +12,7 @@ Design notes:
 """
 import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -438,3 +438,33 @@ class CampaignSpend(Base):
     updated_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class WorkspaceMember(Base):
+    """Team membership on the owner's existing workspace (P3 #1).
+
+    Tenancy stays `User = workspace owner`: an active member's session is
+    resolved to the owner row (so every `user.id` query keeps working), while
+    this table supplies the role. Invites are token-based links - the platform
+    never sends email. A person can be an active member of one workspace at a
+    time in v1 (unique active `member_user_id`).
+    """
+
+    __tablename__ = "workspace_members"
+    __table_args__ = (
+        UniqueConstraint("owner_user_id", "invited_email", name="ux_workspace_members_owner_email"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    owner_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    member_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True, index=True
+    )
+    invited_email: Mapped[str] = mapped_column(String(320), index=True)
+    # admin | manager | agent | viewer (owner is implicit on the account itself)
+    role: Mapped[str] = mapped_column(String(20), default="agent")
+    # invited | active | removed
+    status: Mapped[str] = mapped_column(String(20), default="invited", index=True)
+    invite_token: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True, index=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    accepted_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

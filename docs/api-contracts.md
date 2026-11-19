@@ -138,6 +138,18 @@ Response 200:
 - Spend registry: `GET /api/campaign-spend`, `PUT /api/campaign-spend` (upsert per campaign; `spend >= 0`, empty name → 400/422), `DELETE /api/campaign-spend/{id}` (tenant-404). One row per `(user, campaign)`.
 - Frontend: Reports "Attribution & spend" card — coverage, medians, per-campaign table with inline spend entry + Save, cost ratios, honest notes.
 
+## Live (P3 #1 — team members & roles v1)
+Tenancy is unchanged: `User` is still the workspace. An **active** membership is resolved to the owner account inside `get_current_user`, so all existing `user.id` routes read/write workspace data with no schema change. Roles: `owner` (implicit), `admin`, `manager`, `agent`, `viewer`.
+
+- **Write gates (server-side, 403):** `viewer` is read-only for every non-GET request except `/api/auth/*`. `agent` cannot change business configuration: `PATCH /api/settings`, `/api/landing-ab/*`, `/api/campaign-spend`. Team routes require owner/admin.
+- `GET /api/team` — auth, workspace-scoped. Returns `workspace` (owner id, business name, plan tier), `my_role`, the implicit owner row, and `members[]` (`email`, `role`, `status` invited|active|removed, timestamps). `invite_path` (single-use token) is returned only to owner/admin.
+- `POST /api/team/invite` — owner/admin, 201. Body `{email, role}`; role ∈ admin|manager|agent|viewer (owner rejected). **No email is sent** — the response carries the invite path to share manually. Re-invite rotates the token. 409 when the email already belongs to an account **with its own leads** (never silently re-scope someone's workspace) or is already active here/elsewhere.
+- `POST /api/team/accept` — authenticated invitee, body `{token}`. Single-use; the account email must match the invited email (403 otherwise); token must be pending/valid (404); 409 when the account already owns leads or is active in another workspace. Removal falls back to the member's own (empty) personal workspace.
+- `PATCH /api/team/{id}` — owner/admin, `{role}`; 400 when changing your own role or a removed member; cross-workspace ids → 404.
+- `DELETE /api/team/{id}` — owner/admin, 204, soft-remove (`status=removed`); self-removal refused (400); cross-workspace → 404.
+- `/api/auth/me` (and login/register) now include `role`, `workspace_owner_id`, `workspace_owner_email`, `is_workspace_member`. `email` remains the logged-in identity while `business_name` and data belong to the workspace.
+- **Honest scope:** team seats are manually managed (no billing enforcement), no email delivery, one workspace per person in v1, and no ownership transfer / workspace deletion yet.
+
 ## Ground rules encoded in contracts (Section 0 of the roadmap)
 - Every lead write requires a `source` from the allowlist and a `consent_timestamp`.
 - No endpoint creates outbound-first contact. `messages.direction=in` rows must exist before the bot replies.

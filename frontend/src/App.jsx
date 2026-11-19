@@ -719,6 +719,205 @@ function NurtureEditor() {
   );
 }
 
+function TeamCard() {
+  const [team, setTeam] = useState(null);
+  const [email, setEmail] = useState("");
+  const [role, setRole] = useState("agent");
+  const [msg, setMsg] = useState("");
+  const [error, setError] = useState("");
+  // Invite links arrive as /settings?invite=<token> (owner shares it manually).
+  const [token, setToken] = useState(() => new URLSearchParams(window.location.search).get("invite") || "");
+
+  const load = () =>
+    api("/api/team")
+      .then((b) => setTeam(b))
+      .catch((e) => setError(e instanceof Error ? e.message.replace(/^API \d+: /, "") : "Team load failed."));
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  const manage = team && (team.my_role === "owner" || team.my_role === "admin");
+
+  const doInvite = async () => {
+    setMsg("");
+    setError("");
+    if (!email.trim()) return;
+    try {
+      const b = await api("/api/team/invite", {
+        method: "POST",
+        body: JSON.stringify({ email, role }),
+      });
+      setMsg(`Invite ready for ${b.member.email}. No email is sent — copy the link and share it yourself.`);
+      setEmail("");
+      load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message.replace(/^API \d+: /, "") : "Invite failed.");
+    }
+  };
+
+  const copyLink = (path) => {
+    const full = `${window.location.origin}${path}`;
+    const el = document.createElement("textarea");
+    el.value = full;
+    document.body.appendChild(el);
+    el.select();
+    let copied = false;
+    try {
+      copied = document.execCommand("copy");
+    } catch {
+      copied = false;
+    }
+    document.body.removeChild(el);
+    setMsg(copied ? "Invite link copied." : `Copy this link yourself: ${full}`);
+  };
+
+  const changeRole = async (id, nextRole) => {
+    setError("");
+    try {
+      await api(`/api/team/${id}`, { method: "PATCH", body: JSON.stringify({ role: nextRole }) });
+      setMsg("Role updated. It applies on the member's next request.");
+      load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message.replace(/^API \d+: /, "") : "Role update failed.");
+    }
+  };
+
+  const removeMember = async (id) => {
+    setError("");
+    try {
+      await api(`/api/team/${id}`, { method: "DELETE" });
+      setMsg("Member removed. They fall back to their own workspace.");
+      load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message.replace(/^API \d+: /, "") : "Remove failed.");
+    }
+  };
+
+  const join = async () => {
+    setMsg("");
+    setError("");
+    try {
+      await api("/api/team/accept", { method: "POST", body: JSON.stringify({ token }) });
+      const me = await api("/api/auth/me");
+      setSession(getToken(), me.user);
+      window.location.href = "/";
+    } catch (e) {
+      setError(e instanceof Error ? e.message.replace(/^API \d+: /, "") : "Join failed.");
+    }
+  };
+
+  return (
+    <div className="rounded-xl border border-slate-800 bg-slate-900 p-6 space-y-3">
+      <h3 className="font-semibold">Team &amp; roles</h3>
+      {!team ? (
+        <p className="text-xs text-slate-500">Loading team…</p>
+      ) : (
+        <>
+          <p className="text-xs text-slate-400">
+            {team.workspace.business_name} · your role: <b className="text-slate-200">{team.my_role}</b>
+          </p>
+          <div className="rounded border border-slate-800 divide-y divide-slate-800 text-xs">
+            <div className="flex items-center justify-between px-2 py-1.5">
+              <span className="text-slate-200">{team.owner.email}</span>
+              <span className="rounded bg-sky-900 px-2 py-0.5 text-sky-200">owner</span>
+            </div>
+            {team.members.map((m) => (
+              <div key={m.id} className="px-2 py-1.5 space-y-1">
+                <div className="flex items-center justify-between gap-2">
+                  <span className={m.status === "removed" ? "text-slate-500 line-through" : "text-slate-200"}>
+                    {m.email}
+                  </span>
+                  {manage && m.status !== "removed" ? (
+                    <span className="flex items-center gap-2">
+                      <select
+                        className="rounded bg-slate-800 px-2 py-0.5"
+                        value={m.role}
+                        onChange={(e) => changeRole(m.id, e.target.value)}
+                      >
+                        {["admin", "manager", "agent", "viewer"].map((r) => (
+                          <option key={r} value={r}>{r}</option>
+                        ))}
+                      </select>
+                      <button className="text-rose-300 hover:text-rose-200" onClick={() => removeMember(m.id)}>
+                        Remove
+                      </button>
+                    </span>
+                  ) : (
+                    <span className="rounded bg-slate-800 px-2 py-0.5 text-slate-300">{m.role}</span>
+                  )}
+                </div>
+                <p className="text-slate-500">
+                  {m.status}
+                  {m.invite_path && (
+                    <>
+                      {" · "}
+                      <button className="text-sky-300 hover:text-sky-200" onClick={() => copyLink(m.invite_path)}>
+                        Copy invite link
+                      </button>
+                    </>
+                  )}
+                </p>
+              </div>
+            ))}
+          </div>
+          {manage && (
+            <div className="flex flex-wrap items-end gap-2">
+              <label className="text-xs text-slate-400">
+                Invite by email
+                <input
+                  className="mt-1 block w-56 rounded bg-slate-800 px-2 py-1 text-sm"
+                  type="email"
+                  placeholder="teammate@business.pk"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                />
+              </label>
+              <select
+                className="rounded bg-slate-800 px-2 py-1 text-sm"
+                value={role}
+                onChange={(e) => setRole(e.target.value)}
+              >
+                {["admin", "manager", "agent", "viewer"].map((r) => (
+                  <option key={r} value={r}>{r}</option>
+                ))}
+              </select>
+              <button className="rounded bg-sky-600 px-3 py-1.5 text-sm font-semibold hover:bg-sky-500" onClick={doInvite}>
+                Create invite
+              </button>
+            </div>
+          )}
+          <div className="flex flex-wrap items-end gap-2 pt-1">
+            {team.my_role === "owner" && (
+              <>
+                <label className="text-xs text-slate-400">
+                  Join a workspace (invite token)
+                  <input
+                    className="mt-1 block w-72 rounded bg-slate-800 px-2 py-1 font-mono text-xs"
+                    placeholder="paste the token from your invite link"
+                    value={token}
+                    onChange={(e) => setToken(e.target.value)}
+                  />
+                </label>
+                <button className="rounded bg-emerald-800 px-3 py-1.5 text-sm hover:bg-emerald-700" onClick={join} disabled={!token.trim()}>
+                  Join workspace
+                </button>
+              </>
+            )}
+          </div>
+          {msg && <p className="text-xs text-emerald-400">{msg}</p>}
+          {error && <p className="text-xs text-rose-400">{error}</p>}
+          <p className="text-[11px] text-slate-500">
+            Owner/admin: everything + team · manager: everything except team · agent: leads &amp; conversations,
+            no business settings · viewer: read-only. {team.seats_note} Invites are single-use links —
+            the platform never sends email, and an account that already owns leads cannot join.
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
 function SettingsPanel({ user, onLogout }) {
   const [settings, setSettings] = useState({ niche: "", target_area: "", brand_voice: "", landing_slug: null, show_property_fields: false, business_type: "" });
   const [slugInput, setSlugInput] = useState("");
@@ -856,6 +1055,7 @@ function SettingsPanel({ user, onLogout }) {
         {saved && <span className="text-xs text-emerald-400"> Saved ✓</span>}
         <p className="text-xs text-slate-500">These power the AI content prompts — personalized per business, not generic.</p>
       </div>
+      <TeamCard />
       <IcpEditor />
       <AbEditor />
       <NurtureEditor />
@@ -2427,7 +2627,13 @@ function DashboardApp() {
     <div className="min-h-screen flex">
       <aside className="w-56 shrink-0 border-r border-slate-800 p-4">
         <h1 className="text-lg font-bold mb-1">LeadCraft AI</h1>
-        <p className="text-xs text-slate-400 mb-6">AI content · compliant leads · CRM</p>
+        <p className="text-xs text-slate-400 mb-2">AI content · compliant leads · CRM</p>
+        {user.is_workspace_member && (
+          <p className="text-[11px] text-slate-500 mb-4">
+            {user.business_name} team · <span className="text-slate-300">{user.role}</span>
+          </p>
+        )}
+        {!user.is_workspace_member && <div className="mb-4" />}
         <nav className="space-y-1">
           {navItems.map((item) => (
             <button
@@ -2453,6 +2659,11 @@ function DashboardApp() {
                 <b>Content</b> to generate and schedule posts.
               </p>
               <p className="mt-2 text-xs text-slate-500">Tip: use <b>Inbox</b> (Conversations) to track consented chats, and <b>Leads</b> for stages, BANT, scoring and timelines.</p>
+              {user.role === "viewer" && (
+                <p className="mt-2 text-xs text-amber-400">
+                  Read-only role: you can view this workspace, but every write is blocked by the server.
+                </p>
+              )}
             </div>
             <AnalyticsCard />
           </div>

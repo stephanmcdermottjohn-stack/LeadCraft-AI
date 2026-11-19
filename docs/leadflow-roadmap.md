@@ -68,7 +68,12 @@ Landing-page/form builder (block-based, variants, A/B on headline/CTA/length rep
 B2B visitor identification via a vetted provider (optional, off by default); voice module design (CallHippo-inspired) pending a telephony provider evaluation incl. Pakistan number/regulatory verification; review/referral workflows; advanced attribution.
 
 ### P3 — Commercial Scale
-Agency workspaces, white-label, billing, enterprise permissions.
+Agency workspaces, white-label, billing, enterprise permissions. Plan:
+`docs/p3-plan.md`. Shipped: **team members & roles v1** (`workspace_members`,
+owner-scoped membership resolution, viewer/agent write gates, token invites
+with no email sending). Next: white-label branding, manual billing ledger.
+Agency multi-workspace remains design-only until approved (requires a
+`workspace_id` migration across all data tables).
 
 ---
 

@@ -44,5 +44,7 @@ export async function api(path, options = {}) {
     err.status = res.status;
     throw err;
   }
+  // 204 No Content (deletes, impression beacons): nothing to parse.
+  if (res.status === 204) return null;
   return res.json();
 }
