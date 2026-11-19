@@ -11,19 +11,17 @@ are deliberately **not built** here; they get a design note + approval gate.
 ## Module order
 
 1. **Reviews & referrals v1** (this increment) — consent-first, manual
-   execution, no fake social proof.
+   execution, no fake social proof. **Shipped: `a3341a9`.**
 2. **Advanced attribution v1** — campaign registry with *owner-entered* spend
    (ROI only when spend is stated), time-to-qualify/convert, attribution
    coverage. No multi-touch claims: one capture-time attribution set exists.
-3. *(Design-only, blocked on approval)* **Visitor identification** — provider
-   comparison (Leadfeeder/Albacross-class), free-tier limits, privacy/GDPR
-   posture, cost per site. No integration until the owner approves spend.
-4. *(Design-only, blocked on approval)* **Voice / telephony** — Twilio-class
-   evaluation, Pakistan number + regulatory checklist, per-minute costs. Voice
-   stays out of the product until costs are approved.
+   **Shipped: `8dadf44`.**
+3. *(Design-only, blocked on approval)* **Visitor identification** — see
+   `docs/p2-provider-design.md`. No integration until spend is approved.
+4. *(Design-only, blocked on approval)* **Voice / telephony** — see
+   `docs/p2-provider-design.md`. Pakistan number/regulatory checks first.
 
 ## Module 1 scope — reviews & referrals v1
-
 ### Reviews
 - New table `review_requests`: `user_id, lead_id, channel, status, note,
   requested_at, completed_at`.
