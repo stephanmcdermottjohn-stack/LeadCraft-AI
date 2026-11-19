@@ -112,6 +112,14 @@ Response 200:
 - Honest rules: rates are `null` (never 0%) when there are no sessions, and stay `null` until **30+ unique sessions** in the window ("too early to judge rates"). If client-side `submit` events exceed server-side lead captures, a note says captures are authoritative (client retries can repeat). A permanent note discloses that ad blockers / JS-disabled visitors may be missing.
 - Frontend: Dashboard "Website analytics" card (7/30/90-day window, sessions/page views/form starts/leads, funnel bars, rates or "unknown", honest notes). Landing page tracks `page_view` on load, `form_start` on first form focus, `submit` after a successful capture.
 
+## Live (P1 #5 — funnel + campaign reports v1)
+- `GET /api/reports/funnel?days=1..365` — auth, tenant-scoped. Window = leads **created** in the last N days (older leads excluded; stated in `notes`).
+- `funnel[]`: per stage (`capture…reactivate`) `reached` (distinct leads from the append-only `lead_stage_history` — ever recorded in that stage), `current` (snapshot of `lifecycle_stage`), `reached_rate_pct`. Leads with no history rows at all fall back to their current stage. Honest note: stage order is **not enforced** by the API, so a lead can skip or move back — the funnel does not pretend to be monotonic.
+- `sources[]`, `campaigns[]`, `utm_sources[]`: `{key, total, qualified, converted, qualified_rate_pct, converted_rate_pct}` sorted by volume. Missing attribution is grouped as `(unattributed)` — never guessed.
+- Definitions: **qualified** = left the `capture` stage OR has a score snapshot; **converted** = `convert/retain/reactivate` stage OR CRM `status=converted`.
+- Honest rate gates: rates are `null` (unknown, not 0%) with zero leads, and all rates stay `null` below **10 leads** in the window ("too early"). `rates_known` states which case applies.
+- Frontend: "Reports" nav — window selector (7/30/90), lead/qualified/converted summary, reached-vs-current funnel bars, source/campaign/UTM tables, and the explicit missing-data notes.
+
 ## Ground rules encoded in contracts (Section 0 of the roadmap)
 - Every lead write requires a `source` from the allowlist and a `consent_timestamp`.
 - No endpoint creates outbound-first contact. `messages.direction=in` rows must exist before the bot replies.

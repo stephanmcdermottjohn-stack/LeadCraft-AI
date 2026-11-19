@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { api, clearSession, getToken, getUser, setSession } from "./api/client";
 
 const PLATFORMS = ["facebook", "instagram", "tiktok", "whatsapp_status", "other"];
-const NAV_ITEMS = ["Dashboard", "Content", "Leads", "Conversations", "Settings"];
+const NAV_ITEMS = ["Dashboard", "Content", "Leads", "Conversations", "Reports", "Settings"];
 
 // Business templates (mirrors backend/app/services/business_types.py keys).
 // Selecting one prefills a niche suggestion and turns on the landing extras.
@@ -1881,6 +1881,113 @@ function InboxPanel() {
   );
 }
 
+function ReportsPanel() {
+  const [data, setData] = useState(null);
+  const [days, setDays] = useState(30);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    api(`/api/reports/funnel?days=${days}`)
+      .then(setData)
+      .catch((e) => setError(e.message));
+  }, [days]);
+
+  if (error) return <div className="rounded-xl border border-slate-800 bg-slate-900 p-6 text-sm text-red-400">Reports: {error}</div>;
+  if (!data) return <div className="rounded-xl border border-slate-800 bg-slate-900 p-6 text-sm text-slate-400">Loading report…</div>;
+
+  const pct = (v) => (v === null || v === undefined ? "unknown" : `${v}%`);
+  const maxReached = Math.max(1, ...data.funnel.map((f) => f.reached));
+  const table = (title, rows, keyLabel) => (
+    <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
+      <h3 className="font-semibold text-sm mb-2">{title}</h3>
+      {rows.length === 0 ? (
+        <p className="text-xs text-slate-500">No data in this window.</p>
+      ) : (
+        <table className="w-full text-xs">
+          <thead className="text-slate-500">
+            <tr>
+              <th className="text-left font-normal pb-1">{keyLabel}</th>
+              <th className="text-right font-normal pb-1">Leads</th>
+              <th className="text-right font-normal pb-1">Qualified</th>
+              <th className="text-right font-normal pb-1">Converted</th>
+              <th className="text-right font-normal pb-1">Qual. rate</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.key} className="border-t border-slate-800">
+                <td className="py-1 text-slate-300">{r.key}</td>
+                <td className="py-1 text-right">{r.total}</td>
+                <td className="py-1 text-right">{r.qualified}</td>
+                <td className="py-1 text-right">{r.converted}</td>
+                <td className="py-1 text-right text-slate-400">{pct(r.qualified_rate_pct)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-xl border border-slate-800 bg-slate-900 p-6 space-y-4">
+        <div className="flex flex-wrap items-center gap-3">
+          <h3 className="font-semibold">Lead funnel</h3>
+          <span className="rounded bg-slate-800 px-2 py-0.5 text-[10px] text-slate-300">from stage history</span>
+          <select className="ml-auto rounded bg-slate-800 px-2 py-1 text-xs" value={days} onChange={(e) => setDays(Number(e.target.value))}>
+            <option value={7}>Last 7 days</option>
+            <option value={30}>Last 30 days</option>
+            <option value={90}>Last 90 days</option>
+          </select>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+          <div className="rounded-lg bg-slate-950 border border-slate-800 p-3">
+            <p className="text-xs text-slate-500">Leads</p>
+            <p className="text-xl font-semibold">{data.total_leads}</p>
+          </div>
+          <div className="rounded-lg bg-slate-950 border border-slate-800 p-3">
+            <p className="text-xs text-slate-500">Qualified</p>
+            <p className="text-xl font-semibold">{data.qualified_leads}</p>
+            <p className="text-[10px] text-slate-500">{pct(data.qualified_rate_pct)}</p>
+          </div>
+          <div className="rounded-lg bg-slate-950 border border-slate-800 p-3">
+            <p className="text-xs text-slate-500">Converted</p>
+            <p className="text-xl font-semibold">{data.converted_leads}</p>
+            <p className="text-[10px] text-slate-500">{pct(data.converted_rate_pct)}</p>
+          </div>
+          <div className="rounded-lg bg-slate-950 border border-slate-800 p-3">
+            <p className="text-xs text-slate-500">Rates</p>
+            <p className="text-sm font-semibold">{data.rates_known ? "usable" : "too early"}</p>
+            <p className="text-[10px] text-slate-500">needs 10+ leads</p>
+          </div>
+        </div>
+        <div className="space-y-2">
+          {data.funnel.map((f) => (
+            <div key={f.stage} className="flex items-center gap-2 text-xs">
+              <span className="w-24 text-slate-400 capitalize">{f.stage}</span>
+              <div className="flex-1 h-2 rounded bg-slate-800 overflow-hidden">
+                <div className="h-2 bg-emerald-600" style={{ width: `${Math.max(2, Math.round((f.reached / maxReached) * 100))}%` }} />
+              </div>
+              <span className="w-28 text-right text-slate-300">
+                reached {f.reached} · now {f.current}
+              </span>
+            </div>
+          ))}
+        </div>
+        <ul className="list-disc list-inside text-[11px] text-slate-500 space-y-0.5">
+          {data.notes.map((n) => (<li key={n}>{n}</li>))}
+        </ul>
+      </div>
+      <div className="grid md:grid-cols-2 gap-4">
+        {table("By source", data.sources, "Source")}
+        {table("By campaign", data.campaigns, "Campaign")}
+      </div>
+      {table("By UTM source", data.utm_sources, "UTM source")}
+    </div>
+  );
+}
+
 function AnalyticsCard() {
   const [data, setData] = useState(null);
   const [days, setDays] = useState(30);
@@ -2087,6 +2194,7 @@ function DashboardApp() {
         )}
         {active === "Content" && <ContentPanel />}
         {active === "Leads" && <LeadsPanel />}
+        {active === "Reports" && <ReportsPanel />}
         {active === "Settings" && <SettingsPanel user={user} onLogout={logout} />}
         {active === "Admin" && <AdminPanel />}
         {active === "Conversations" && <InboxPanel />}
