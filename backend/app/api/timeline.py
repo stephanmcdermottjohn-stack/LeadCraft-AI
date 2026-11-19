@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.api.auth import get_current_user
 from app.db import get_db
-from app.models import Lead, LeadActivity, LeadNote, LeadStageHistory, User
+from app.models import Conversation, Lead, LeadActivity, LeadNote, LeadStageHistory, Message, User
 
 router = APIRouter(prefix="/api/leads")
 
@@ -31,6 +31,11 @@ def lead_timeline(
     for a in db.scalars(select(LeadActivity).where(LeadActivity.lead_id == lead.id)).all():
         text = a.detail or a.kind
         events.append({"type": a.kind, "text": text, "at": a.created_at})
+    # Inbox messages (P1 #3): the lead's conversations thread, both directions.
+    for conv in db.scalars(select(Conversation).where(Conversation.lead_id == lead.id)).all():
+        for m in db.scalars(select(Message).where(Message.conversation_id == conv.id)).all():
+            arrow = "→ them" if m.direction == "out" else "← them"
+            events.append({"type": "message", "text": f"[{conv.channel}] {arrow}: {m.body}", "at": m.sent_at})
     events.sort(key=lambda e: e["at"] or e["at"].replace(tzinfo=None), reverse=True)
     return {
         "timeline": [

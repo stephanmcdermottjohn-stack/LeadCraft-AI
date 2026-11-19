@@ -1684,6 +1684,164 @@ function LeadsPanel() {
   );
 }
 
+function InboxPanel() {
+  const [conversations, setConversations] = useState([]);
+  const [activeConv, setActiveConv] = useState(null); // conversation object
+  const [thread, setThread] = useState([]);
+  const [reply, setReply] = useState("");
+  const [error, setError] = useState("");
+  const [msg, setMsg] = useState("");
+  const [showNew, setShowNew] = useState(false);
+  const [leads, setLeads] = useState([]);
+  const [newLead, setNewLead] = useState("");
+  const [newChannel, setNewChannel] = useState("whatsapp_inbound");
+  const CHANNELS = ["whatsapp_inbound", "website_chat", "direct_message"];
+
+  const loadConvs = () =>
+    api("/api/inbox/conversations").then((b) => setConversations(b.conversations)).catch((e) => setError(e.message));
+  useEffect(() => {
+    loadConvs();
+  }, []);
+
+  const openConv = async (c) => {
+    setActiveConv(c);
+    setMsg("");
+    try {
+      const b = await api(`/api/inbox/conversations/${c.id}/messages`);
+      setThread(b.messages);
+      if (b.conversation) setActiveConv(b.conversation);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Thread load failed.");
+    }
+  };
+
+  const send = async (direction) => {
+    if (!activeConv || !reply.trim()) return;
+    setMsg("");
+    try {
+      const b = await api(`/api/inbox/conversations/${activeConv.id}/messages`, {
+        method: "POST",
+        body: JSON.stringify({ direction, body: reply }),
+      });
+      setThread((t) => [...t, b.message]);
+      setReply("");
+      if (direction === "in") {
+        // The consent gate opens the moment the lead speaks: refresh the active
+        // conversation so the reply button enables without reopening.
+        setActiveConv((c) => (c ? { ...c, has_inbound: true } : c));
+      }
+      loadConvs();
+    } catch (err) {
+      setMsg(err instanceof Error ? err.message.replace(/^API \d+: /, "") : "Send failed.");
+    }
+  };
+
+  const startNew = async () => {
+    setError(""); setMsg("");
+    try {
+      const b = await api("/api/inbox/conversations", {
+        method: "POST",
+        body: JSON.stringify({ lead_id: Number(newLead), channel: newChannel }),
+      });
+      setShowNew(false);
+      setNewLead("");
+      await loadConvs();
+      openConv(b.conversation);
+    } catch (err) {
+      setMsg(err instanceof Error ? err.message.replace(/^API \d+: /, "") : "Create failed.");
+    }
+  };
+
+  const openNewForm = () => {
+    setShowNew((s) => !s);
+    api("/api/leads").then((b) => setLeads(b.leads)).catch(() => {});
+  };
+
+  return (
+    <div className="grid grid-cols-[320px_1fr] gap-4">
+      <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="font-semibold text-sm">Conversations</h3>
+          <button className="text-xs text-sky-400 hover:text-sky-300" onClick={openNewForm}>+ New</button>
+        </div>
+        {showNew && (
+          <div className="space-y-2 rounded-lg border border-slate-800 bg-slate-950 p-3 text-xs">
+            <select className="w-full rounded bg-slate-800 px-2 py-1" value={newLead} onChange={(e) => setNewLead(e.target.value)}>
+              <option value="">Choose lead…</option>
+              {leads.map((l) => (
+                <option key={l.id} value={l.id}>{l.name} ({l.phone})</option>
+              ))}
+            </select>
+            <select className="w-full rounded bg-slate-800 px-2 py-1" value={newChannel} onChange={(e) => setNewChannel(e.target.value)}>
+              {CHANNELS.map((c) => (<option key={c} value={c}>{c}</option>))}
+            </select>
+            <button className="rounded bg-sky-700 px-3 py-1 hover:bg-sky-600" onClick={startNew}>Open conversation</button>
+          </div>
+        )}
+        {error && <p className="text-xs text-red-400">{error}</p>}
+        <ul className="space-y-2">
+          {conversations.map((c) => (
+            <li key={c.id}>
+              <button className={`w-full text-left rounded-lg border p-3 text-xs ${activeConv?.id === c.id ? "border-sky-600 bg-slate-950" : "border-slate-800 bg-slate-950 hover:border-slate-700"}`} onClick={() => openConv(c)}>
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold text-sm">{c.lead_name}</span>
+                  <span className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px]">{c.channel}</span>
+                </div>
+                <p className="mt-1 text-slate-400 truncate">
+                  {c.last_direction === "out" ? "→ " : c.last_direction === "in" ? "← " : ""}{c.last_message_preview || "No messages yet"}
+                </p>
+              </button>
+            </li>
+          ))}
+          {conversations.length === 0 && <li className="text-xs text-slate-500">No conversations yet — open one from a lead.</li>}
+        </ul>
+      </div>
+      <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
+        {!activeConv ? (
+          <p className="text-sm text-slate-400">Select a conversation to view the thread.</p>
+        ) : (
+          <div className="space-y-3">
+            <div>
+              <h3 className="font-semibold">{activeConv.lead_name}</h3>
+              <p className="text-xs text-slate-500">
+                {activeConv.channel} · {activeConv.lead_phone}
+                {!activeConv.has_inbound && " · consent rule: the lead must speak first"}
+              </p>
+            </div>
+            <ul className="space-y-2 max-h-96 overflow-y-auto">
+              {thread.map((m) => (
+                <li key={m.id} className={`max-w-[80%] rounded-lg p-2 text-sm ${m.direction === "out" ? "ml-auto bg-sky-900/60" : "bg-slate-950 border border-slate-800"}`}>
+                  <p className="text-[10px] text-slate-500">{m.direction === "out" ? "You" : "Lead"} · {m.sent_at ? new Date(m.sent_at).toLocaleString() : ""}</p>
+                  <p className="text-slate-200 whitespace-pre-wrap">{m.body}</p>
+                </li>
+              ))}
+              {thread.length === 0 && <li className="text-xs text-slate-500">No messages yet — record the lead's inbound message first.</li>}
+            </ul>
+            {msg && <p className="text-xs text-red-400">{msg}</p>}
+            <div className="flex gap-2">
+              <input
+                className="flex-1 rounded-lg bg-slate-800 px-3 py-2 text-sm"
+                placeholder="Write the message… (platform records it — you send it from your own WhatsApp/phone)"
+                value={reply}
+                onChange={(e) => setReply(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") send(activeConv.has_inbound ? "out" : "in"); }}
+              />
+              <button className="rounded bg-slate-800 px-3 py-2 text-xs hover:bg-slate-700" onClick={() => send("in")}>
+                ← Log inbound
+              </button>
+              <button className="rounded bg-sky-700 px-3 py-2 text-xs font-semibold hover:bg-sky-600 disabled:opacity-40"
+                      disabled={!activeConv.has_inbound} title={activeConv.has_inbound ? "" : "Outbound-first is not allowed — the lead must message first"}
+                      onClick={() => send("out")}>
+                Reply →
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function AdminPanel() {
   const [stats, setStats] = useState(null);
   const [error, setError] = useState("");
@@ -1806,18 +1964,14 @@ function DashboardApp() {
               Welcome back, {user.business_name}. Use <b>Settings</b> to define your niche and brand voice, then{" "}
               <b>Content</b> to generate and schedule posts.
             </p>
-            <p className="mt-2 text-xs text-slate-500">Conversations panel arrives in Phase 4 (WhatsApp funnel).</p>
+            <p className="mt-2 text-xs text-slate-500">Tip: use <b>Inbox</b> (Conversations) to track consented chats, and <b>Leads</b> for stages, BANT, scoring and timelines.</p>
           </div>
         )}
         {active === "Content" && <ContentPanel />}
         {active === "Leads" && <LeadsPanel />}
         {active === "Settings" && <SettingsPanel user={user} onLogout={logout} />}
         {active === "Admin" && <AdminPanel />}
-        {active === "Conversations" && (
-          <div className="rounded-xl border border-slate-800 bg-slate-900 p-6 text-sm text-slate-400">
-            This panel ships in Phase 4 (WhatsApp funnel).
-          </div>
-        )}
+        {active === "Conversations" && <InboxPanel />}
       </main>
     </div>
   );

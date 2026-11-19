@@ -96,6 +96,15 @@ Response 200:
 - `GET /api/nurture/campaigns` includes per-campaign `metrics` (`enrolled_total`, `active`, `completed`, `stopped`, `suppressed`, `touches_surfaced` + honest note).
 - Frontend: Settings "Nurture campaigns" editor (steps rows: day + message); per-lead "Nurture" panel (choose campaign → Enroll, enrollment status, Stop, "Check due" runs the pass on demand).
 
+## Live (P1 #3 — unified inbox v1)
+- **Consent-first gate is enforced in the API, not just the UI.** Recording an inbound message is always allowed; an **outbound** message is refused (400, "Outbound-first contact is not allowed - record the lead's inbound message first.") until that conversation has at least one `direction=in` message.
+- Channels allowlist: `whatsapp_inbound | website_chat | direct_message`. Unknown → 400. Conversation creation also requires the lead's `consent_timestamp` (400 otherwise) and is tenant-checked (404). `POST /api/inbox/conversations` `{lead_id, channel}`.
+- `GET /api/inbox/conversations` — auth. Own-tenant conversations, newest activity first; per row: `{id, lead_id, lead_name, lead_phone, channel, last_message_at, last_message_preview (≤120 chars), last_direction, has_inbound}`.
+- `GET /api/inbox/conversations/{id}/messages` — auth, tenant-404. `{conversation, messages: [{id, direction, body, sent_at}]}` oldest first.
+- `POST /api/inbox/conversations/{id}/messages` `{direction: in|out, body: 1–2000}` → 201. Whitespace-only body → 422; other direction → 400. The platform only **records** messages: the owner sends from their own WhatsApp/phone (no provider is wired — zero external cost). No auto-bot in v1.
+- Timeline merge: every message also appears in `GET /api/leads/{id}/timeline` as `{type: "message", text: "[channel] → them: …" (out) / "← them: …" (in)}`.
+- Frontend: "Conversations" nav is now the real inbox — left list (channel badge, direction arrow + preview), "+ New" (lead + channel), thread view, "← Log inbound" / "Reply →" (reply disabled with an explanation until the lead has spoken).
+
 ## Ground rules encoded in contracts (Section 0 of the roadmap)
 - Every lead write requires a `source` from the allowlist and a `consent_timestamp`.
 - No endpoint creates outbound-first contact. `messages.direction=in` rows must exist before the bot replies.
