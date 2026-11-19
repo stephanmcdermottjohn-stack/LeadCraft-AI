@@ -12,7 +12,7 @@ Design notes:
 """
 import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -399,7 +399,6 @@ class AnalyticsEvent(Base):
 
 class ReviewRequest(Base):
     """Consent-first review-ask log (P2 #1).
-
     The platform NEVER sends a review request: 'requested' means the owner asked
     through their own channel; 'completed' / 'declined' are logged manually.
     No rating or review text is stored, so nothing here can become fabricated
@@ -418,3 +417,24 @@ class ReviewRequest(Base):
     note: Mapped[str] = mapped_column(String(500), default="")
     requested_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     completed_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class CampaignSpend(Base):
+    """Owner-entered campaign spend (P2 #2). One row per (user, campaign).
+
+    Spend is never inferred from an ad platform - it is whatever the owner
+    types in. Cost-per-lead/qualified/conversion are `null` until a spend row
+    exists. Revenue is not tracked anywhere, so ROI is never computed.
+    """
+
+    __tablename__ = "campaign_spends"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    campaign: Mapped[str] = mapped_column(String(200), index=True)
+    spend: Mapped[float] = mapped_column(Float, default=0.0)
+    currency: Mapped[str] = mapped_column(String(10), default="PKR")
+    notes: Mapped[str] = mapped_column(String(500), default="")
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )

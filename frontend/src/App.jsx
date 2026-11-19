@@ -2003,8 +2003,13 @@ function ReportsPanel() {
   const [data, setData] = useState(null);
   const [reviews, setReviews] = useState(null);
   const [referrals, setReferrals] = useState(null);
+  const [attr, setAttr] = useState(null);
+  const [spendEdits, setSpendEdits] = useState({});
+  const [spendMsg, setSpendMsg] = useState("");
   const [days, setDays] = useState(30);
   const [error, setError] = useState("");
+
+  const loadAttr = () => api(`/api/attribution/report?days=${days}`).then(setAttr).catch(() => {});
 
   useEffect(() => {
     api(`/api/reports/funnel?days=${days}`)
@@ -2012,7 +2017,22 @@ function ReportsPanel() {
       .catch((e) => setError(e.message));
     api("/api/reviews").then((b) => setReviews(b.summary)).catch(() => {});
     api(`/api/referrals/report?days=365`).then(setReferrals).catch(() => {});
+    loadAttr();
   }, [days]);
+
+  const saveSpend = async (campaign) => {
+    const raw = spendEdits[campaign];
+    if (raw === undefined || raw === "") return;
+    setSpendMsg("");
+    try {
+      await api("/api/campaign-spend", { method: "PUT", body: JSON.stringify({ campaign, spend: Number(raw) }) });
+      setSpendMsg(`Spend saved for "${campaign}".`);
+      setSpendEdits((s) => ({ ...s, [campaign]: "" }));
+      loadAttr();
+    } catch (e) {
+      setSpendMsg(e instanceof Error ? e.message.replace(/^API \d+: /, "") : "Save failed.");
+    }
+  };
 
   if (error) return <div className="rounded-xl border border-slate-800 bg-slate-900 p-6 text-sm text-red-400">Reports: {error}</div>;
   if (!data) return <div className="rounded-xl border border-slate-800 bg-slate-900 p-6 text-sm text-slate-400">Loading report…</div>;
@@ -2154,6 +2174,81 @@ function ReportsPanel() {
           )}
         </div>
       </div>
+      {attr && (
+        <div className="rounded-xl border border-slate-800 bg-slate-900 p-6 space-y-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="font-semibold">Attribution &amp; spend</h3>
+            <span className="rounded bg-slate-800 px-2 py-0.5 text-[10px] text-slate-300">capture-time only · no multi-touch</span>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+            <div className="rounded-lg bg-slate-950 border border-slate-800 p-3">
+              <p className="text-slate-500">Leads</p>
+              <p className="text-lg font-semibold">{attr.coverage.leads}</p>
+            </div>
+            <div className="rounded-lg bg-slate-950 border border-slate-800 p-3">
+              <p className="text-slate-500">Campaign tagged</p>
+              <p className="text-lg font-semibold">{attr.coverage.campaign_coverage_pct === null ? "unknown" : `${attr.coverage.campaign_coverage_pct}%`}</p>
+            </div>
+            <div className="rounded-lg bg-slate-950 border border-slate-800 p-3">
+              <p className="text-slate-500">UTM tagged</p>
+              <p className="text-lg font-semibold">{attr.coverage.utm_coverage_pct === null ? "unknown" : `${attr.coverage.utm_coverage_pct}%`}</p>
+            </div>
+            <div className="rounded-lg bg-slate-950 border border-slate-800 p-3">
+              <p className="text-slate-500">Median time-to-stage</p>
+              <p className="text-sm font-semibold">
+                qualify {attr.median_time_to_qualify_days === null ? "unknown" : `${attr.median_time_to_qualify_days}d`}
+                {" · "}convert {attr.median_time_to_convert_days === null ? "unknown" : `${attr.median_time_to_convert_days}d`}
+              </p>
+            </div>
+          </div>
+          <table className="w-full text-xs">
+            <thead className="text-slate-500">
+              <tr>
+                <th className="text-left font-normal pb-1">Campaign</th>
+                <th className="text-right font-normal pb-1">Leads</th>
+                <th className="text-right font-normal pb-1">Qualified</th>
+                <th className="text-right font-normal pb-1">Converted</th>
+                <th className="text-right font-normal pb-1">Spend (PKR)</th>
+                <th className="text-right font-normal pb-1">Cost/lead</th>
+                <th className="text-right font-normal pb-1">Cost/qual.</th>
+                <th className="text-right font-normal pb-1">Cost/conv.</th>
+              </tr>
+            </thead>
+            <tbody>
+              {attr.campaigns.map((c) => (
+                <tr key={c.campaign} className="border-t border-slate-800">
+                  <td className="py-1 text-slate-300">{c.campaign}</td>
+                  <td className="py-1 text-right">{c.leads}</td>
+                  <td className="py-1 text-right">{c.qualified}</td>
+                  <td className="py-1 text-right">{c.converted}</td>
+                  <td className="py-1 text-right">
+                    {c.campaign === "(unattributed)" ? (
+                      <span className="text-slate-500">—</span>
+                    ) : (
+                      <span className="flex items-center justify-end gap-1">
+                        <input
+                          className="w-20 rounded bg-slate-800 px-2 py-0.5 text-right"
+                          type="number" min="0" placeholder={c.spend === null ? "not set" : String(c.spend)}
+                          value={spendEdits[c.campaign] ?? ""}
+                          onChange={(e) => setSpendEdits((s) => ({ ...s, [c.campaign]: e.target.value }))}
+                        />
+                        <button className="text-[10px] text-sky-400 hover:text-sky-300" onClick={() => saveSpend(c.campaign)}>Save</button>
+                      </span>
+                    )}
+                  </td>
+                  <td className="py-1 text-right text-slate-400">{c.cost_per_lead === null ? "unknown" : c.cost_per_lead}</td>
+                  <td className="py-1 text-right text-slate-400">{c.cost_per_qualified === null ? "unknown" : c.cost_per_qualified}</td>
+                  <td className="py-1 text-right text-slate-400">{c.cost_per_conversion === null ? "unknown" : c.cost_per_conversion}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {spendMsg && <p className="text-xs text-emerald-400">{spendMsg}</p>}
+          <ul className="list-disc list-inside text-[11px] text-slate-500 space-y-0.5">
+            {attr.notes.map((n) => (<li key={n}>{n}</li>))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }

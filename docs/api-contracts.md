@@ -129,6 +129,15 @@ Response 200:
 - Leads API now returns `referred_by_lead_id`; landing page passes `?ref=` through as `referral_code`.
 - Frontend: per-lead "Review" (converted leads only; log ask / mark completed / declined) and "Refer" (generates + copies the share link); Reports adds Reviews and Referrals cards.
 
+## Live (P2 #2 — advanced attribution v1)
+- `GET /api/attribution/report?days=1..3650` — auth, tenant-scoped. **Capture-time attribution only**: one campaign/UTM set per lead, no multi-touch modelling (stated in `notes`).
+- `coverage`: `leads`, `campaign_tagged`, `utm_tagged`, `any_tagged` + percentages (`null`, never 0%, when there are no leads). Missing tags are reported, never inferred.
+- `campaigns[]`: `leads/qualified/converted`, rates (gated: `null` below 10 leads), owner-entered `spend`/`currency`, and `cost_per_lead` / `cost_per_qualified` / `cost_per_conversion` (`null` until spend is set — never invented). Spend rows with zero leads still surface. `utm_sources[]` for source-level counts (spend is campaign-level only).
+- `median_time_to_qualify_days` / `median_time_to_convert_days` from platform timestamps only (lead `created_at` → first qualifying stage-history row), with sample counts and an explicit "unknown" note when no samples. Never backdated or estimated.
+- **No ROI**: revenue is not tracked anywhere, so the report says so instead of computing a fake return.
+- Spend registry: `GET /api/campaign-spend`, `PUT /api/campaign-spend` (upsert per campaign; `spend >= 0`, empty name → 400/422), `DELETE /api/campaign-spend/{id}` (tenant-404). One row per `(user, campaign)`.
+- Frontend: Reports "Attribution & spend" card — coverage, medians, per-campaign table with inline spend entry + Save, cost ratios, honest notes.
+
 ## Ground rules encoded in contracts (Section 0 of the roadmap)
 - Every lead write requires a `source` from the allowlist and a `consent_timestamp`.
 - No endpoint creates outbound-first contact. `messages.direction=in` rows must exist before the bot replies.
