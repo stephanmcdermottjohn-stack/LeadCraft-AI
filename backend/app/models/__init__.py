@@ -367,3 +367,26 @@ class Message(Base):
     sent_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     conversation: Mapped[Conversation] = relationship(back_populates="messages")
+
+
+class AnalyticsEvent(Base):
+    """First-party, cookie-free website analytics events (P1 #4).
+
+    The landing page generates an opaque session id in sessionStorage (cleared
+    when the tab closes) and posts page_view / form_start / submit. No cookies,
+    no IPs, no personal data: only the event name, the path (query string
+    stripped) and the referrer host. Raw rows are append-only.
+    """
+
+    __tablename__ = "analytics_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    slug: Mapped[str] = mapped_column(String(100), index=True)
+    session_id: Mapped[str] = mapped_column(String(64), index=True)
+    # page_view | form_start | submit
+    event: Mapped[str] = mapped_column(String(30))
+    path: Mapped[str] = mapped_column(String(200), default="")
+    # Host only (never the full referring URL - it can contain search terms).
+    referrer: Mapped[str] = mapped_column(String(200), default="")
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

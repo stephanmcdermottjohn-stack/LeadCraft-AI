@@ -890,6 +890,34 @@ function LandingPage({ slug }) {
     };
   })();
 
+  // First-party analytics (P1 #4): cookie-free session id in sessionStorage.
+  const track = (event) => {
+    try {
+      let sid = sessionStorage.getItem("lc_sid") || "";
+      if (!sid) {
+        sid = (typeof crypto !== "undefined" && crypto.randomUUID
+          ? crypto.randomUUID()
+          : `${Date.now()}${Math.random().toString(36).slice(2)}`
+        )
+          .replace(/[^A-Za-z0-9_-]/g, "")
+          .slice(0, 64);
+        sessionStorage.setItem("lc_sid", sid);
+      }
+      api(`/api/public/landing/${encodeURIComponent(slug)}/events`, {
+        method: "POST",
+        body: JSON.stringify({
+          session_id: sid,
+          event,
+          path: window.location.pathname,
+          referrer: document.referrer || "",
+        }),
+      }).catch(() => {});
+    } catch {
+      /* private mode: analytics just isn't recorded */
+    }
+  };
+  const [formStarted, setFormStarted] = useState(false);
+
   useEffect(() => {
     // A/B arm persistence: the visitor keeps the same arm across reloads via
     // their own localStorage (no cookies). First visit -> server assigns.
@@ -914,6 +942,7 @@ function LandingPage({ slug }) {
           method: "POST",
           body: JSON.stringify({ variant: cfg.ab_variant || "control" }),
         }).catch(() => {});
+        track("page_view");
       })
       .catch(() => setConfig(null));
   }, [slug]);
@@ -939,6 +968,7 @@ function LandingPage({ slug }) {
           consent,
         }),
       });
+      track("submit");
       setDone(true);
     } catch (err) {
       setError(err instanceof Error ? err.message.replace(/^API \d+: /, "") : "Submission failed.");
@@ -986,7 +1016,16 @@ function LandingPage({ slug }) {
             </p>
           </div>
         ) : (
-          <form onSubmit={submit} className="space-y-4">
+          <form
+            onSubmit={submit}
+            className="space-y-4"
+            onFocus={() => {
+              if (!formStarted) {
+                setFormStarted(true);
+                track("form_start");
+              }
+            }}
+          >
             <div>
               <h1 className="text-2xl font-bold">
                 {config.variant?.headline || config.business_name}
@@ -1842,6 +1881,82 @@ function InboxPanel() {
   );
 }
 
+function AnalyticsCard() {
+  const [data, setData] = useState(null);
+  const [days, setDays] = useState(30);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    api(`/api/analytics/summary?days=${days}`)
+      .then(setData)
+      .catch((e) => setError(e.message));
+  }, [days]);
+
+  if (error) return <div className="rounded-xl border border-slate-800 bg-slate-900 p-6 text-xs text-red-400">Analytics: {error}</div>;
+  if (!data) return <div className="rounded-xl border border-slate-800 bg-slate-900 p-6 text-sm text-slate-400">Loading analytics…</div>;
+
+  const f = data.funnel;
+  const bar = (value, max) => (max > 0 ? `${Math.max(2, Math.round((value / max) * 100))}%` : "0%");
+  const rate = (v) => (v === null || v === undefined ? "unknown" : `${v}%`);
+
+  return (
+    <div className="rounded-xl border border-slate-800 bg-slate-900 p-6 space-y-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <h3 className="font-semibold">Website analytics</h3>
+        <span className="rounded bg-slate-800 px-2 py-0.5 text-[10px] text-slate-300">cookie-free · first-party</span>
+        <select className="ml-auto rounded bg-slate-800 px-2 py-1 text-xs" value={days} onChange={(e) => setDays(Number(e.target.value))}>
+          <option value={7}>Last 7 days</option>
+          <option value={30}>Last 30 days</option>
+          <option value={90}>Last 90 days</option>
+        </select>
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+        <div className="rounded-lg bg-slate-950 border border-slate-800 p-3">
+          <p className="text-xs text-slate-500">Sessions</p>
+          <p className="text-xl font-semibold">{data.sessions_total}</p>
+        </div>
+        <div className="rounded-lg bg-slate-950 border border-slate-800 p-3">
+          <p className="text-xs text-slate-500">Page views</p>
+          <p className="text-xl font-semibold">{data.event_counts.page_view}</p>
+        </div>
+        <div className="rounded-lg bg-slate-950 border border-slate-800 p-3">
+          <p className="text-xs text-slate-500">Form starts</p>
+          <p className="text-xl font-semibold">{f.form_start_sessions}</p>
+        </div>
+        <div className="rounded-lg bg-slate-950 border border-slate-800 p-3">
+          <p className="text-xs text-slate-500">Leads captured</p>
+          <p className="text-xl font-semibold">{data.leads_captured}</p>
+        </div>
+      </div>
+      <div className="space-y-2">
+        <p className="text-xs text-slate-500">Funnel (unique sessions)</p>
+        {[
+          ["Visited page", f.page_view_sessions],
+          ["Started the form", f.form_start_sessions],
+          ["Submitted", f.submit_sessions],
+        ].map(([label, value]) => (
+          <div key={label} className="flex items-center gap-2 text-xs">
+            <span className="w-32 text-slate-400">{label}</span>
+            <div className="flex-1 h-2 rounded bg-slate-800 overflow-hidden">
+              <div className="h-2 bg-sky-600" style={{ width: bar(value, f.page_view_sessions) }} />
+            </div>
+            <span className="w-10 text-right text-slate-300">{value}</span>
+          </div>
+        ))}
+      </div>
+      <p className="text-xs text-slate-400">
+        Form-start rate: <b>{rate(data.form_start_rate_pct)}</b> · Submit rate: <b>{rate(data.submit_rate_pct)}</b>
+        {!data.rates_known && data.sessions_total > 0 && " (need 30+ sessions before rates mean anything)"}
+      </p>
+      {data.notes.length > 0 && (
+        <ul className="list-disc list-inside text-[11px] text-slate-500 space-y-0.5">
+          {data.notes.map((n) => (<li key={n}>{n}</li>))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function AdminPanel() {
   const [stats, setStats] = useState(null);
   const [error, setError] = useState("");
@@ -1958,13 +2073,16 @@ function DashboardApp() {
       <main className="flex-1 p-8">
         <h2 className="text-2xl font-bold mb-4">{active}</h2>
         {active === "Dashboard" && (
-          <div className="rounded-xl border border-slate-800 bg-slate-900 p-6 text-sm">
-            <p className="text-emerald-400 font-semibold">Connected</p>
-            <p className="mt-2 text-slate-300">
-              Welcome back, {user.business_name}. Use <b>Settings</b> to define your niche and brand voice, then{" "}
-              <b>Content</b> to generate and schedule posts.
-            </p>
-            <p className="mt-2 text-xs text-slate-500">Tip: use <b>Inbox</b> (Conversations) to track consented chats, and <b>Leads</b> for stages, BANT, scoring and timelines.</p>
+          <div className="space-y-4">
+            <div className="rounded-xl border border-slate-800 bg-slate-900 p-6 text-sm">
+              <p className="text-emerald-400 font-semibold">Connected</p>
+              <p className="mt-2 text-slate-300">
+                Welcome back, {user.business_name}. Use <b>Settings</b> to define your niche and brand voice, then{" "}
+                <b>Content</b> to generate and schedule posts.
+              </p>
+              <p className="mt-2 text-xs text-slate-500">Tip: use <b>Inbox</b> (Conversations) to track consented chats, and <b>Leads</b> for stages, BANT, scoring and timelines.</p>
+            </div>
+            <AnalyticsCard />
           </div>
         )}
         {active === "Content" && <ContentPanel />}

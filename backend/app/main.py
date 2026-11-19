@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app import db as db_module
 from app.api.admin import router as admin_router
+from app.api.analytics import router as analytics_router
 from app.api.auth import router as auth_router
 from app.api.content import router as content_router
 from app.api.health import router as health_router
@@ -98,6 +99,7 @@ def create_app() -> FastAPI:
     app.include_router(public_router)
     app.include_router(icp_router)
     app.include_router(landing_ab_router)
+    app.include_router(analytics_router)
     app.include_router(nurture_router)
     app.include_router(inbox_router)
     app.include_router(qualification_router)

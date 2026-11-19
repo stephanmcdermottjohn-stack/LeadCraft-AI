@@ -105,6 +105,13 @@ Response 200:
 - Timeline merge: every message also appears in `GET /api/leads/{id}/timeline` as `{type: "message", text: "[channel] → them: …" (out) / "← them: …" (in)}`.
 - Frontend: "Conversations" nav is now the real inbox — left list (channel badge, direction arrow + preview), "+ New" (lead + channel), thread view, "← Log inbound" / "Reply →" (reply disabled with an explanation until the lead has spoken).
 
+## Live (P1 #4 — website analytics v1)
+- First-party, **cookie-free, PII-free** events. The landing page creates an opaque session id in `sessionStorage` (`lc_sid` — gone when the tab closes) and posts `page_view` / `form_start` / `submit`. Stored: event name, path (query string stripped), referrer **host only** — no IPs, user agents or full URLs.
+- `POST /api/public/landing/{slug}/events` `{session_id, event, path?, referrer?}` → 204 always. Malformed payloads (session id must be 8–64 `[A-Za-z0-9_-]`, event must be in the allowlist) and unknown slugs are silently ignored — no probing, never breaks the landing page.
+- `GET /api/analytics/summary?days=1..365` — auth, tenant-scoped. Returns `events_total`, `sessions_total`, `event_counts`, `funnel` (unique sessions: page_view / form_start / submit), `form_start_rate_pct`, `submit_rate_pct`, `leads_captured` (server-side, authoritative), `daily` (last ≤14 days), `rates_known`, `notes`.
+- Honest rules: rates are `null` (never 0%) when there are no sessions, and stay `null` until **30+ unique sessions** in the window ("too early to judge rates"). If client-side `submit` events exceed server-side lead captures, a note says captures are authoritative (client retries can repeat). A permanent note discloses that ad blockers / JS-disabled visitors may be missing.
+- Frontend: Dashboard "Website analytics" card (7/30/90-day window, sessions/page views/form starts/leads, funnel bars, rates or "unknown", honest notes). Landing page tracks `page_view` on load, `form_start` on first form focus, `submit` after a successful capture.
+
 ## Ground rules encoded in contracts (Section 0 of the roadmap)
 - Every lead write requires a `source` from the allowlist and a `consent_timestamp`.
 - No endpoint creates outbound-first contact. `messages.direction=in` rows must exist before the bot replies.

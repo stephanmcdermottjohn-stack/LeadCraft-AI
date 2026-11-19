@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.models import ClientSettings, LandingEvent, LandingVariant, User
-from app.services import business_types
+from app.services import analytics, business_types
 
 router = APIRouter(prefix="/api/public")
 
@@ -93,3 +93,18 @@ def log_impression(slug: str, body: dict | None = None, db: Session = Depends(ge
             variant = candidate
     db.add(LandingEvent(user_id=row.user_id, slug=slug, variant=variant, event="impression"))
     db.commit()
+
+
+@router.post("/landing/{slug}/events", status_code=204)
+def log_analytics_event(slug: str, body: dict | None = None, db: Session = Depends(get_db)) -> None:
+    """First-party analytics events (P1 #4): page_view / form_start / submit.
+
+    Cookie-free and PII-free. Malformed payloads and unknown slugs are silently
+    ignored (204) so the endpoint cannot be used to probe slug existence and
+    never breaks the landing page.
+    """
+    row = db.scalar(select(ClientSettings).where(ClientSettings.landing_slug == slug))
+    if row is None or not isinstance(body, dict):
+        return
+    if analytics.record_event(db, row.user_id, slug, body):
+        db.commit()
