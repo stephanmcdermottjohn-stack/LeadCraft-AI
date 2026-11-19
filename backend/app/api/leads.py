@@ -58,6 +58,9 @@ class LeadCaptureBody(BaseModel):
     utm_content: str = Field(default="", max_length=200)
     utm_term: str = Field(default="", max_length=200)
     landing_variant: str = Field(default="", max_length=50)
+    # Referral link (?ref=<code>): resolved inside the business, invalid codes
+    # are ignored silently. Never leaks whether a code exists.
+    referral_code: str = Field(default="", max_length=32)
     # Honeypot: humans never fill this; bots do. 400 on non-empty.
     company: str = Field(default="", max_length=200)
     # Explicit consent checkbox on the form. Required.
@@ -137,6 +140,7 @@ def _public_lead(lead: Lead) -> dict:
         "utm_content": lead.utm_content,
         "utm_term": lead.utm_term,
         "landing_variant": lead.landing_variant,
+        "referred_by_lead_id": lead.referred_by_lead_id,
         "metadata": _metadata(lead),
         "created_at": lead.created_at.isoformat() if lead.created_at else None,
     }
@@ -163,6 +167,12 @@ def capture(body: LeadCaptureBody, db: Session = Depends(get_db)) -> dict:
     settings_row = db.scalar(select(ClientSettings).where(ClientSettings.landing_slug == body.slug))
     if settings_row is None:
         raise HTTPException(status_code=404, detail="Unknown business page.")
+
+    # Referral link (P2 #1): link-based only, same business, never the new lead
+    # itself (it has no id yet). Unknown codes are ignored silently.
+    from app.services import referrals as referrals_svc
+
+    referrer = referrals_svc.resolve_code(db, settings_row.user_id, body.referral_code)
 
     # Template extras: whitelist keys against the business's enabled template.
     # Legacy top-level property fields map into the same metadata dict.
@@ -198,6 +208,8 @@ def capture(body: LeadCaptureBody, db: Session = Depends(get_db)) -> dict:
         utm_content=body.utm_content.strip(),
         utm_term=body.utm_term.strip(),
         landing_variant=body.landing_variant.strip(),
+        referral_code=None,
+        referred_by_lead_id=referrer.id if referrer else None,
         next_action=default_next_action("capture"),
         metadata_json=json.dumps(metadata),
         created_at=datetime.datetime.now(datetime.timezone.utc),

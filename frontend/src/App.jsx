@@ -887,6 +887,7 @@ function LandingPage({ slug }) {
       utm_content: get("utm_content"),
       utm_term: get("utm_term"),
       landing_variant: (p.get("v") || "").slice(0, 50),
+      referral_code: (p.get("ref") || "").slice(0, 32),
     };
   })();
 
@@ -1354,6 +1355,80 @@ function LeadsPanel() {
     }
   };
 
+  // Reviews & referrals (P2 #1): owner-executed, consent-first.
+  const [openReview, setOpenReview] = useState(null); // lead id
+  const [reviewsByLead, setReviewsByLead] = useState({});
+  const [reviewChannel, setReviewChannel] = useState("whatsapp");
+  const [reviewMsg, setReviewMsg] = useState("");
+  const [referralLinks, setReferralLinks] = useState({});
+  const [openReferral, setOpenReferral] = useState(null); // lead id
+
+  const loadReview = async (id) => {
+    const b = await api(`/api/reviews?lead_id=${id}`);
+    const open = b.reviews.find((r) => r.status === "requested") || b.reviews[0];
+    setReviewsByLead((s) => ({ ...s, [id]: open || null }));
+    return open;
+  };
+
+  const toggleReview = async (id) => {
+    if (openReview === id) {
+      setOpenReview(null);
+      return;
+    }
+    setReviewMsg(""); setReviewChannel("whatsapp");
+    try {
+      await loadReview(id);
+      setOpenReview(id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Review load failed.");
+    }
+  };
+
+  const requestReview = async (leadId) => {
+    setReviewMsg("");
+    try {
+      const b = await api("/api/reviews", { method: "POST", body: JSON.stringify({ lead_id: leadId, channel: reviewChannel }) });
+      setReviewsByLead((s) => ({ ...s, [leadId]: b.review }));
+      setReviewMsg("Logged. You send the ask yourself - the platform sends nothing.");
+    } catch (err) {
+      setReviewMsg(err instanceof Error ? err.message.replace(/^API \d+: /, "") : "Request failed.");
+    }
+  };
+
+  const resolveReview = async (leadId, status) => {
+    const r = reviewsByLead[leadId];
+    if (!r) return;
+    try {
+      const b = await api(`/api/reviews/${r.id}`, { method: "PATCH", body: JSON.stringify({ status }) });
+      setReviewsByLead((s) => ({ ...s, [leadId]: b.review }));
+      setReviewMsg(`Marked ${status}.`);
+    } catch (err) {
+      setReviewMsg(err instanceof Error ? err.message.replace(/^API \d+: /, "") : "Update failed.");
+    }
+  };
+
+  const toggleReferral = async (id) => {
+    if (openReferral === id) {
+      setOpenReferral(null);
+      return;
+    }
+    try {
+      const b = await api(`/api/referrals/leads/${id}/code`, { method: "POST" });
+      setReferralLinks((s) => ({ ...s, [id]: b }));
+      const el = document.createElement("textarea");
+      el.value = `${window.location.origin}${b.path || ""}`;
+      document.body.appendChild(el);
+      el.select();
+      let copied = false;
+      try { copied = document.execCommand("copy"); } catch { copied = false; }
+      document.body.removeChild(el);
+      if (copied) setReferralLinks((s) => ({ ...s, [id]: { ...b, copied: true } }));
+      setOpenReferral(id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message.replace(/^API \d+: /, "") : "Referral link failed.");
+    }
+  };
+
   const mdLine = (md) => {
     const entries = Object.entries(md ?? {}).filter(([, v]) => String(v).trim());
     if (!entries.length) return "";
@@ -1672,6 +1747,49 @@ function LeadsPanel() {
                   {nurtureMsg && <p className="text-slate-400">{nurtureMsg}</p>}
                 </div>
               )}
+              <button className="mt-2 ml-3 text-xs text-emerald-300 hover:text-emerald-200" onClick={() => toggleReview(l.id)}>
+                {openReview === l.id ? "Hide review" : "Review"}
+              </button>
+              {openReview === l.id && (
+                <div className="mt-1 rounded border border-slate-800 bg-slate-900 p-2 text-xs space-y-2">
+                  {reviewsByLead[l.id] ? (
+                    <p className="text-slate-300">
+                      Review ask: <b>{reviewsByLead[l.id].status}</b> · via {reviewsByLead[l.id].channel}
+                      {reviewsByLead[l.id].status === "requested" && (
+                        <>
+                          <button className="ml-2 text-emerald-300 hover:text-emerald-200" onClick={() => resolveReview(l.id, "completed")}>Mark completed</button>
+                          <button className="ml-2 text-rose-300 hover:text-rose-200" onClick={() => resolveReview(l.id, "declined")}>Mark declined</button>
+                        </>
+                      )}
+                    </p>
+                  ) : (
+                    <div className="flex gap-2 items-center">
+                      <select className="rounded bg-slate-800 px-2 py-1" value={reviewChannel} onChange={(e) => setReviewChannel(e.target.value)}>
+                        {["whatsapp", "phone", "email", "in_person"].map((c) => (<option key={c} value={c}>{c}</option>))}
+                      </select>
+                      <button className="rounded bg-emerald-800 px-3 py-1 hover:bg-emerald-700" onClick={() => requestReview(l.id)}>
+                        Log review ask
+                      </button>
+                    </div>
+                  )}
+                  <p className="text-slate-500">You send the ask yourself; the platform only records it. Converted leads only.</p>
+                  {reviewMsg && <p className="text-slate-400">{reviewMsg}</p>}
+                </div>
+              )}
+              <button className="mt-2 ml-3 text-xs text-amber-300 hover:text-amber-200" onClick={() => toggleReferral(l.id)}>
+                {openReferral === l.id ? "Hide referral" : "Refer"}
+              </button>
+              {openReferral === l.id && referralLinks[l.id] && (
+                <div className="mt-1 rounded border border-slate-800 bg-slate-900 p-2 text-xs space-y-1">
+                  <p className="text-slate-300">
+                    Share link: <code className="text-slate-200 break-all">{`${window.location.origin}${referralLinks[l.id].path || ""}`}</code>
+                  </p>
+                  <p className="text-slate-500">
+                    {referralLinks[l.id].copied ? "Copied to clipboard. " : ""}
+                    The referred person submits the normal consent form; only link-based referrals are tracked.
+                  </p>
+                </div>
+              )}
               {openTimeline === l.id && (
                 <ul className="mt-1 space-y-1 border-t border-slate-800 pt-2">
                   {(timelines[l.id] ?? []).map((e, i) => (
@@ -1883,6 +2001,8 @@ function InboxPanel() {
 
 function ReportsPanel() {
   const [data, setData] = useState(null);
+  const [reviews, setReviews] = useState(null);
+  const [referrals, setReferrals] = useState(null);
   const [days, setDays] = useState(30);
   const [error, setError] = useState("");
 
@@ -1890,6 +2010,8 @@ function ReportsPanel() {
     api(`/api/reports/funnel?days=${days}`)
       .then(setData)
       .catch((e) => setError(e.message));
+    api("/api/reviews").then((b) => setReviews(b.summary)).catch(() => {});
+    api(`/api/referrals/report?days=365`).then(setReferrals).catch(() => {});
   }, [days]);
 
   if (error) return <div className="rounded-xl border border-slate-800 bg-slate-900 p-6 text-sm text-red-400">Reports: {error}</div>;
@@ -1984,6 +2106,54 @@ function ReportsPanel() {
         {table("By campaign", data.campaigns, "Campaign")}
       </div>
       {table("By UTM source", data.utm_sources, "UTM source")}
+      <div className="grid md:grid-cols-2 gap-4">
+        <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
+          <h3 className="font-semibold text-sm mb-1">Reviews</h3>
+          {!reviews ? (
+            <p className="text-xs text-slate-500">No data.</p>
+          ) : (
+            <>
+              <p className="text-xs text-slate-400">
+                Requested {reviews.total} · completed {reviews.completed} · declined {reviews.declined} · open {reviews.requested}
+              </p>
+              <p className="text-xs text-slate-400 mt-1">
+                Completion rate: <b>{reviews.completion_rate_pct === null ? "unknown" : `${reviews.completion_rate_pct}%`}</b>
+              </p>
+              <p className="text-[11px] text-slate-500 mt-2">{reviews.note}</p>
+              {reviews.sample_note && <p className="text-[11px] text-amber-500/80 mt-1">{reviews.sample_note}</p>}
+            </>
+          )}
+        </div>
+        <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
+          <h3 className="font-semibold text-sm mb-1">Referrals</h3>
+          {!referrals ? (
+            <p className="text-xs text-slate-500">No data.</p>
+          ) : (
+            <>
+              <p className="text-xs text-slate-400">
+                Referred {referrals.referrals_total} · qualified {referrals.qualified_total} · converted {referrals.converted_total}
+              </p>
+              <p className="text-xs text-slate-400 mt-1">
+                Conversion rate: <b>{referrals.converted_rate_pct === null ? "unknown" : `${referrals.converted_rate_pct}%`}</b>
+                {!referrals.rates_known && referrals.referrals_total > 0 && " (10+ referrals needed)"}
+              </p>
+              {referrals.referrers.length > 0 && (
+                <ul className="mt-2 space-y-1 text-xs text-slate-300">
+                  {referrals.referrers.slice(0, 5).map((r) => (
+                    <li key={r.lead_id} className="flex justify-between">
+                      <span>{r.name}</span>
+                      <span className="text-slate-400">{r.referrals} referred · {r.converted} converted</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <p className="text-[11px] text-slate-500 mt-2">
+                Only link-based referrals are measured; manual word-of-mouth is outside these numbers.
+              </p>
+            </>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

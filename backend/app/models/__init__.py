@@ -116,6 +116,11 @@ class Lead(Base):
     utm_term: Mapped[str] = mapped_column(String(200), default="")
     landing_variant: Mapped[str] = mapped_column(String(50), default="")
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # --- Referrals (P2 #1) -----------------------------------------------------
+    # Random, per-business share code; a lead captured with ?ref=<code> is
+    # linked to the referring lead. Set at capture only (no cycles possible).
+    referral_code: Mapped[str | None] = mapped_column(String(24), nullable=True, index=True)
+    referred_by_lead_id: Mapped[int | None] = mapped_column(ForeignKey("leads.id"), nullable=True, index=True)
 
     user: Mapped[User] = relationship(back_populates="leads")
     conversations: Mapped[list["Conversation"]] = relationship(back_populates="lead")
@@ -390,3 +395,26 @@ class AnalyticsEvent(Base):
     # Host only (never the full referring URL - it can contain search terms).
     referrer: Mapped[str] = mapped_column(String(200), default="")
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ReviewRequest(Base):
+    """Consent-first review-ask log (P2 #1).
+
+    The platform NEVER sends a review request: 'requested' means the owner asked
+    through their own channel; 'completed' / 'declined' are logged manually.
+    No rating or review text is stored, so nothing here can become fabricated
+    social proof. Only converted leads can be asked (see services/reviews.py).
+    """
+
+    __tablename__ = "review_requests"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    lead_id: Mapped[int] = mapped_column(ForeignKey("leads.id"), index=True)
+    # whatsapp | phone | email | in_person
+    channel: Mapped[str] = mapped_column(String(30), default="whatsapp")
+    # requested | completed | declined
+    status: Mapped[str] = mapped_column(String(20), default="requested")
+    note: Mapped[str] = mapped_column(String(500), default="")
+    requested_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    completed_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -120,6 +120,15 @@ Response 200:
 - Honest rate gates: rates are `null` (unknown, not 0%) with zero leads, and all rates stay `null` below **10 leads** in the window ("too early"). `rates_known` states which case applies.
 - Frontend: "Reports" nav — window selector (7/30/90), lead/qualified/converted summary, reached-vs-current funnel bars, source/campaign/UTM tables, and the explicit missing-data notes.
 
+## Live (P2 #1 — reviews & referrals v1)
+- **Reviews** (`review_requests`): `GET/POST /api/reviews`, `PATCH /api/reviews/{id}` — auth, tenant-404. Gates: lead must have `consent_timestamp` **and** be converted (`lifecycle_stage in convert/retain/reactivate` OR CRM `status=converted`); any other lead → 400. One **open** request per lead (duplicate → 400); re-request allowed after completed/declined. `requested → completed|declined` only (double-resolve → 400).
+- **The platform never sends review asks.** `requested` logs the owner's own ask; outcomes are manual. No rating/review text is stored or displayed (no fabricated social proof). Each change writes a `review` timeline activity.
+- Review summary: `total`, `requested`, `completed`, `declined`, `by_channel`, `completion_rate_pct` (`null` with zero asks, never 0%), plus a small-sample note below 10 requests.
+- **Referrals:** `POST /api/referrals/leads/{id}/code` returns a random per-business code + share path `/l/<slug>?ref=<code>` (stable on repeat). Capture accepts `referral_code`; the new lead gets `referred_by_lead_id` (same-tenant FK, capture-time only → no cycles). Unknown or cross-tenant codes are **silently ignored** — the public form never reveals code existence.
+- `GET /api/referrals/report?days=1..3650` — auth, tenant-scoped: per-referrer referrals/qualified/converted + totals. `rates_known` false below 10 referred leads → rates `null` ("too early", never 0%). Only link-based referrals are measured; manual word-of-mouth is explicitly outside the numbers.
+- Leads API now returns `referred_by_lead_id`; landing page passes `?ref=` through as `referral_code`.
+- Frontend: per-lead "Review" (converted leads only; log ask / mark completed / declined) and "Refer" (generates + copies the share link); Reports adds Reviews and Referrals cards.
+
 ## Ground rules encoded in contracts (Section 0 of the roadmap)
 - Every lead write requires a `source` from the allowlist and a `consent_timestamp`.
 - No endpoint creates outbound-first contact. `messages.direction=in` rows must exist before the bot replies.
