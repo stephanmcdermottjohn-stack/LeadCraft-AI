@@ -18,6 +18,8 @@ router = APIRouter(prefix="/api/settings")
 # Public URL slugs: lowercase letters/digits with inner hyphens, 3-100 chars.
 SLUG_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{1,98}[a-z0-9])?$")
 RESERVED_SLUGS = {"api", "admin", "login", "register", "settings", "leads", "public", "l"}
+COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 class SettingsBody(BaseModel):
@@ -36,6 +38,13 @@ class SettingsBody(BaseModel):
     # P0 #5: engagement-score weights. Omitted = keep; {} = reset to defaults.
     # Unknown keys are dropped; values clamped to 0..100 (never a 422 surprise).
     scoring_weights: dict[str, int] | None = None
+    # P3 #2 white-label branding (presentation only).
+    brand_name: str | None = Field(default=None, max_length=200)
+    logo_url: str | None = Field(default=None, max_length=500)
+    primary_color: str | None = Field(default=None, max_length=20)
+    support_email: str | None = Field(default=None, max_length=320)
+    footer_text: str | None = Field(default=None, max_length=300)
+    hide_platform_brand: bool | None = None
 
 
 def _slugify(text: str) -> str:
@@ -57,6 +66,14 @@ def _public(s: ClientSettings) -> dict:
         "show_property_fields": bool(s.show_property_fields),
         "business_type": s.business_type or "",
         "scoring_weights": scoring_service.effective_weights(s),
+        "brand_name": s.brand_name or "",
+        "logo_url": s.logo_url or "",
+        "primary_color": s.primary_color or "",
+        "support_email": s.support_email or "",
+        "footer_text": s.footer_text or "",
+        "hide_platform_brand": bool(s.hide_platform_brand),
+        "white_label_note": "Presentation only - no custom domain and no plan enforcement. "
+        "The platform brand is hidden on your landing page and dashboard header when enabled.",
     }
 
 
@@ -122,6 +139,35 @@ def update_settings(body: SettingsBody, user: User = Depends(get_current_user), 
     if body.scoring_weights is not None:
         sanitized = scoring_service.sanitize_weights(body.scoring_weights)
         row.scoring_weights_json = json.dumps(sanitized)
+
+    # P3 #2 white-label branding: presentation only. Colours and logo URLs are
+    # validated so the landing page never renders javascript:/data: payloads.
+    if body.brand_name is not None:
+        row.brand_name = body.brand_name.strip()
+    if body.logo_url is not None:
+        value = body.logo_url.strip()
+        if value and not (value.startswith("https://") or value.startswith("http://") or value.startswith("/")):
+            raise HTTPException(
+                status_code=400,
+                detail="logo_url must be an absolute http(s) URL or a path starting with '/'.",
+            )
+        if any(ch.isspace() for ch in value):
+            raise HTTPException(status_code=400, detail="logo_url cannot contain spaces.")
+        row.logo_url = value
+    if body.primary_color is not None:
+        value = body.primary_color.strip()
+        if value and not COLOR_RE.fullmatch(value):
+            raise HTTPException(status_code=400, detail="primary_color must be a hex colour like #0ea5e9.")
+        row.primary_color = value.lower()
+    if body.support_email is not None:
+        value = body.support_email.strip()
+        if value and not EMAIL_RE.fullmatch(value):
+            raise HTTPException(status_code=400, detail="support_email must be a valid email address.")
+        row.support_email = value
+    if body.footer_text is not None:
+        row.footer_text = body.footer_text.strip()
+    if body.hide_platform_brand is not None:
+        row.hide_platform_brand = bool(body.hide_platform_brand)
 
     db.commit()
     return {"settings": _public(row)}

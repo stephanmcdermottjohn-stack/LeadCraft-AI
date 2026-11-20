@@ -918,8 +918,231 @@ function TeamCard() {
   );
 }
 
+function BillingCard() {
+  const [data, setData] = useState(null);
+  const [denied, setDenied] = useState(false);
+  const [plan, setPlan] = useState("");
+  const [form, setForm] = useState({
+    amount: "", currency: "PKR", period_start: "", period_end: "", paid_until: "", note: "",
+  });
+  const [msg, setMsg] = useState("");
+  const [error, setError] = useState("");
+
+  const load = () =>
+    api("/api/billing")
+      .then((b) => {
+        setData(b);
+        setPlan(b.plan_tier);
+      })
+      .catch((e) => {
+        if (e.status === 403) setDenied(true);
+        else setError(e instanceof Error ? e.message.replace(/^API \d+: /, "") : "Billing load failed.");
+      });
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  const addEntry = async () => {
+    setMsg("");
+    setError("");
+    if (!form.amount) return;
+    try {
+      await api("/api/billing", {
+        method: "POST",
+        body: JSON.stringify({
+          amount: Number(form.amount),
+          currency: form.currency || "PKR",
+          period_start: form.period_start || null,
+          period_end: form.period_end || null,
+          paid_until: form.paid_until || null,
+          note: form.note,
+        }),
+      });
+      setMsg("Recorded. No payment is processed by the platform.");
+      setForm({ amount: "", currency: form.currency || "PKR", period_start: "", period_end: "", paid_until: "", note: "" });
+      load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message.replace(/^API \d+: /, "") : "Could not record the payment.");
+    }
+  };
+
+  const removeEntry = async (id) => {
+    setError("");
+    try {
+      await api(`/api/billing/${id}`, { method: "DELETE" });
+      load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message.replace(/^API \d+: /, "") : "Delete failed.");
+    }
+  };
+
+  const savePlan = async () => {
+    setMsg("");
+    setError("");
+    try {
+      const b = await api("/api/billing/plan", { method: "PATCH", body: JSON.stringify({ plan_tier: plan }) });
+      setMsg(b.note);
+      load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message.replace(/^API \d+: /, "") : "Plan update failed.");
+    }
+  };
+
+  if (denied) {
+    return (
+      <div className="rounded-xl border border-slate-800 bg-slate-900 p-6">
+        <h3 className="font-semibold">Billing ledger</h3>
+        <p className="mt-1 text-xs text-slate-500">Owner or admin role required. Nothing is charged by the platform.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border border-slate-800 bg-slate-900 p-6 space-y-3">
+      <h3 className="font-semibold">Billing ledger (manual)</h3>
+      <p className="text-xs text-slate-500">
+        Record what was actually paid. There is no payment gateway, no card data and no auto-charging; totals are
+        grouped per currency with no conversion.
+      </p>
+      {!data ? (
+        <p className="text-xs text-slate-500">Loading ledger…</p>
+      ) : (
+        <>
+          <div className="flex flex-wrap items-end gap-2">
+            <label className="text-xs text-slate-400">
+              Plan label
+              <select
+                className="mt-1 block rounded bg-slate-800 px-2 py-1 text-sm"
+                value={plan}
+                onChange={(e) => setPlan(e.target.value)}
+              >
+                {(data.plan_tiers || []).map((t) => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </select>
+            </label>
+            <button className="rounded bg-slate-800 px-3 py-1.5 text-sm hover:bg-slate-700" onClick={savePlan}>
+              Save plan label
+            </button>
+            <span className="text-[11px] text-slate-500">Current: {data.plan_tier}</span>
+          </div>
+
+          {data.entries.length === 0 ? (
+            <p className="text-xs text-slate-500">No payments recorded yet.</p>
+          ) : (
+            <table className="w-full text-xs">
+              <thead className="text-slate-500">
+                <tr>
+                  <th className="text-left font-normal pb-1">Recorded</th>
+                  <th className="text-right font-normal pb-1">Amount</th>
+                  <th className="text-left font-normal pb-1 pl-2">Period</th>
+                  <th className="text-left font-normal pb-1 pl-2">Paid until</th>
+                  <th className="text-left font-normal pb-1 pl-2">Note</th>
+                  <th className="pb-1" />
+                </tr>
+              </thead>
+              <tbody>
+                {data.entries.map((e) => (
+                  <tr key={e.id} className="border-t border-slate-800">
+                    <td className="py-1 text-slate-400">{e.created_at ? new Date(e.created_at).toLocaleDateString() : ""}</td>
+                    <td className="py-1 text-right">{e.amount} {e.currency}</td>
+                    <td className="py-1 pl-2 text-slate-400">
+                      {e.period_start || "?"} → {e.period_end || "?"}
+                    </td>
+                    <td className="py-1 pl-2 text-slate-400">{e.paid_until || "—"}</td>
+                    <td className="py-1 pl-2 text-slate-400">{e.note || "—"}</td>
+                    <td className="py-1 text-right">
+                      <button className="text-rose-300 hover:text-rose-200" onClick={() => removeEntry(e.id)}>Delete</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+
+          <div className="rounded border border-slate-800 p-2 space-y-2">
+            <p className="text-xs text-slate-400">Record a payment</p>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-xs">
+              <label className="text-slate-400">
+                Amount
+                <input
+                  type="number" min="0" step="0.01"
+                  className="mt-1 block w-full rounded bg-slate-800 px-2 py-1"
+                  value={form.amount}
+                  onChange={(e) => setForm({ ...form, amount: e.target.value })}
+                />
+              </label>
+              <label className="text-slate-400">
+                Currency
+                <input
+                  className="mt-1 block w-full rounded bg-slate-800 px-2 py-1"
+                  value={form.currency}
+                  onChange={(e) => setForm({ ...form, currency: e.target.value })}
+                />
+              </label>
+              <label className="text-slate-400">
+                Paid until
+                <input
+                  type="date"
+                  className="mt-1 block w-full rounded bg-slate-800 px-2 py-1"
+                  value={form.paid_until}
+                  onChange={(e) => setForm({ ...form, paid_until: e.target.value })}
+                />
+              </label>
+              <label className="text-slate-400">
+                Period start
+                <input
+                  type="date"
+                  className="mt-1 block w-full rounded bg-slate-800 px-2 py-1"
+                  value={form.period_start}
+                  onChange={(e) => setForm({ ...form, period_start: e.target.value })}
+                />
+              </label>
+              <label className="text-slate-400">
+                Period end
+                <input
+                  type="date"
+                  className="mt-1 block w-full rounded bg-slate-800 px-2 py-1"
+                  value={form.period_end}
+                  onChange={(e) => setForm({ ...form, period_end: e.target.value })}
+                />
+              </label>
+              <label className="text-slate-400">
+                Note
+                <input
+                  className="mt-1 block w-full rounded bg-slate-800 px-2 py-1"
+                  placeholder="cash / bank transfer"
+                  value={form.note}
+                  onChange={(e) => setForm({ ...form, note: e.target.value })}
+                />
+              </label>
+            </div>
+            <button className="rounded bg-emerald-800 px-3 py-1.5 text-sm hover:bg-emerald-700" onClick={addEntry}>
+              Record payment
+            </button>
+          </div>
+
+          {data.entry_count > 0 && (
+            <p className="text-xs text-slate-300">
+              Recorded total:{" "}
+              {Object.entries(data.totals_by_currency).map(([cur, total]) => `${total} ${cur}`).join(" · ")}
+              {data.latest_paid_until && <span className="text-slate-500"> · paid until {data.latest_paid_until}</span>}
+            </p>
+          )}
+          {msg && <p className="text-xs text-emerald-400">{msg}</p>}
+          {error && <p className="text-xs text-rose-400">{error}</p>}
+          <ul className="list-disc list-inside text-[11px] text-slate-500 space-y-0.5">
+            {data.notes.map((n) => (<li key={n}>{n}</li>))}
+          </ul>
+        </>
+      )}
+    </div>
+  );
+}
+
 function SettingsPanel({ user, onLogout }) {
-  const [settings, setSettings] = useState({ niche: "", target_area: "", brand_voice: "", landing_slug: null, show_property_fields: false, business_type: "" });
+  const [settings, setSettings] = useState({ niche: "", target_area: "", brand_voice: "", landing_slug: null, show_property_fields: false, business_type: "", brand_name: "", logo_url: "", primary_color: "", support_email: "", footer_text: "", hide_platform_brand: false });
   const [slugInput, setSlugInput] = useState("");
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
@@ -956,6 +1179,12 @@ function SettingsPanel({ user, onLogout }) {
         // Toggle + template are always sent so the controls are the source of truth.
         show_property_fields: settings.show_property_fields,
         business_type: settings.business_type,
+        brand_name: settings.brand_name,
+        logo_url: settings.logo_url,
+        primary_color: settings.primary_color,
+        support_email: settings.support_email,
+        footer_text: settings.footer_text,
+        hide_platform_brand: settings.hide_platform_brand,
       };
       const b = await api("/api/settings", { method: "PATCH", body: JSON.stringify(payload) });
       setSettings(b.settings);
@@ -1055,7 +1284,55 @@ function SettingsPanel({ user, onLogout }) {
         {saved && <span className="text-xs text-emerald-400"> Saved ✓</span>}
         <p className="text-xs text-slate-500">These power the AI content prompts — personalized per business, not generic.</p>
       </div>
+      <div className="rounded-xl border border-slate-800 bg-slate-900 p-6 space-y-4">
+        <h3 className="font-semibold">White-label branding</h3>
+        <p className="text-xs text-slate-500">
+          Presentation only — no custom domain, no plan enforcement. Applies to your dashboard header and public
+          landing page.
+        </p>
+        {field("brand_name", "Brand name (shown instead of your business name)")}
+        {field("logo_url", "Logo URL (https://… or /path)")}
+        <div className="space-y-1">
+          <label className="block text-sm">
+            Primary colour
+            <div className="mt-1 flex gap-2 items-center">
+              <input
+                className="flex-1 rounded-lg bg-slate-800 px-3 py-2"
+                placeholder="#0ea5e9 (leave empty for the default theme)"
+                value={settings.primary_color}
+                onChange={(e) => setSettings({ ...settings, primary_color: e.target.value })}
+              />
+              <input
+                type="color"
+                className="h-9 w-12 rounded bg-slate-800"
+                value={/^#[0-9a-fA-F]{6}$/.test(settings.primary_color) ? settings.primary_color : "#0ea5e9"}
+                onChange={(e) => setSettings({ ...settings, primary_color: e.target.value })}
+              />
+            </div>
+          </label>
+        </div>
+        {field("support_email", "Support email (shown on the landing page)")}
+        {field("footer_text", "Footer text (landing page)", true)}
+        <label className="block text-sm">
+          <span className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={settings.hide_platform_brand}
+              onChange={(e) => setSettings({ ...settings, hide_platform_brand: e.target.checked })}
+            />
+            Hide the LeadCraft AI brand (dashboard header + landing footer)
+          </span>
+        </label>
+        <button className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold hover:bg-sky-500" onClick={save}>
+          Save branding
+        </button>
+        <p className="text-[11px] text-slate-500">
+          Both Save buttons write the same settings record. Roles: owner/admin/manager only — agents and viewers
+          cannot change business settings.
+        </p>
+      </div>
       <TeamCard />
+      <BillingCard />
       <IcpEditor />
       <AbEditor />
       <NurtureEditor />
@@ -1205,6 +1482,10 @@ function LandingPage({ slug }) {
     </label>
   );
 
+  const brand = config.brand_name || config.business_name;
+  const accent = /^#[0-9a-fA-F]{6}$/.test(config.primary_color || "") ? config.primary_color : "";
+  const footer = config.footer_text || (config.hide_platform_brand ? "" : "Powered by LeadCraft AI");
+
   return (
     <div className="min-h-screen flex items-center justify-center p-4">
       <div className="w-full max-w-md rounded-xl border border-slate-800 bg-slate-900 p-6">
@@ -1213,7 +1494,7 @@ function LandingPage({ slug }) {
             <div className="text-4xl">✅</div>
             <h1 className="text-xl font-bold">Thank you, {form.name.split(" ")[0]}!</h1>
             <p className="text-sm text-slate-400">
-              {config.business_name} has received your request and will reach out soon.
+              {brand} has received your request and will reach out soon.
             </p>
           </div>
         ) : (
@@ -1228,8 +1509,11 @@ function LandingPage({ slug }) {
             }}
           >
             <div>
+              {config.logo_url && (
+                <img src={config.logo_url} alt={brand} className="max-h-12 mb-2 rounded" />
+              )}
               <h1 className="text-2xl font-bold">
-                {config.variant?.headline || config.business_name}
+                {config.variant?.headline || brand}
               </h1>
               <p className="text-sm text-slate-400">
                 {config.variant?.subtext ||
@@ -1299,18 +1583,24 @@ function LandingPage({ slug }) {
                 required
               />
               <span>
-                I agree that {config.business_name} may contact me using the details above. My consent and the
+                I agree that {brand} may contact me using the details above. My consent and the
                 submission time are recorded.
               </span>
             </label>
+            {config.support_email && (
+              <p className="text-[11px] text-slate-500">
+                Questions? <a className="underline" href={`mailto:${config.support_email}`}>{config.support_email}</a>
+              </p>
+            )}
             {error && <p className="text-xs text-red-400">{error}</p>}
             <button
-              className="w-full rounded-lg bg-sky-600 py-2 text-sm font-semibold hover:bg-sky-500 disabled:opacity-50"
+              className={`w-full rounded-lg py-2 text-sm font-semibold ${accent ? "" : "bg-sky-600 hover:bg-sky-500"} disabled:opacity-50`}
+              style={accent ? { backgroundColor: accent } : undefined}
               disabled={busy || !consent}
             >
               {busy ? "Sending…" : (config.variant?.cta_label || "Request a callback")}
             </button>
-            <p className="text-[10px] text-slate-500 text-center">Powered by LeadCraft AI</p>
+            {footer && <p className="text-[10px] text-slate-500 text-center">{footer}</p>}
           </form>
         )}
       </div>
@@ -2614,8 +2904,20 @@ export default function App() {
 function DashboardApp() {
   const [user, setUser] = useState(getUser());
   const [active, setActive] = useState("Dashboard");
+  // White-label (P3 #2): the header follows the workspace's branding. Read
+  // errors are ignored — the default platform name is the honest fallback.
+  const [brand, setBrand] = useState(null);
+  useEffect(() => {
+    if (!user) return;
+    api("/api/settings")
+      .then((b) => setBrand(b.settings))
+      .catch(() => {});
+  }, [user]);
 
   if (!user) return <AuthScreen onAuthed={setUser} />;
+
+  const brandName = brand?.brand_name || (brand?.hide_platform_brand ? user.business_name : "LeadCraft AI");
+  const tagline = brand?.hide_platform_brand ? user.business_name : "AI content · compliant leads · CRM";
 
   const navItems = user.is_admin ? [...NAV_ITEMS, "Admin"] : NAV_ITEMS;
   const logout = () => {
@@ -2626,14 +2928,18 @@ function DashboardApp() {
   return (
     <div className="min-h-screen flex">
       <aside className="w-56 shrink-0 border-r border-slate-800 p-4">
-        <h1 className="text-lg font-bold mb-1">LeadCraft AI</h1>
-        <p className="text-xs text-slate-400 mb-2">AI content · compliant leads · CRM</p>
+        {brand?.logo_url ? (
+          <img src={brand.logo_url} alt={brandName} className="max-h-8 mb-1" />
+        ) : (
+          <h1 className="text-lg font-bold mb-1">{brandName}</h1>
+        )}
+        <p className="text-xs text-slate-400 mb-2">{tagline}</p>
         {user.is_workspace_member && (
           <p className="text-[11px] text-slate-500 mb-4">
             {user.business_name} team · <span className="text-slate-300">{user.role}</span>
           </p>
         )}
-        {!user.is_workspace_member && <div className="mb-4" />}
+        {!user.is_workspace_member && <div className="mb-2" />}
         <nav className="space-y-1">
           {navItems.map((item) => (
             <button
@@ -2642,6 +2948,9 @@ function DashboardApp() {
               className={`w-full text-left px-3 py-2 rounded-lg text-sm ${
                 active === item ? "bg-sky-600 text-white" : "text-slate-300 hover:bg-slate-800"
               }`}
+              style={active === item && brand?.primary_color && /^#[0-9a-fA-F]{6}$/.test(brand.primary_color)
+                ? { backgroundColor: brand.primary_color }
+                : undefined}
             >
               {item}
             </button>

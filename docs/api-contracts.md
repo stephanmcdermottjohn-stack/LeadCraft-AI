@@ -150,6 +150,25 @@ Tenancy is unchanged: `User` is still the workspace. An **active** membership is
 - `/api/auth/me` (and login/register) now include `role`, `workspace_owner_id`, `workspace_owner_email`, `is_workspace_member`. `email` remains the logged-in identity while `business_name` and data belong to the workspace.
 - **Honest scope:** team seats are manually managed (no billing enforcement), no email delivery, one workspace per person in v1, and no ownership transfer / workspace deletion yet.
 
+## Live (P3 #2 — white-label branding v1)
+Presentation only: no custom domain, no separate tenant, no plan enforcement (stated in the API payload and UI).
+
+- `PATCH /api/settings` accepts `brand_name` (≤200), `logo_url` (≤500), `primary_color`, `support_email` (≤320), `footer_text` (≤300), `hide_platform_brand`. Owner/admin/manager only (agents/viewers cannot write settings).
+- Validation: `primary_color` must be `#RRGGBB` (stored lowercase) or empty; `logo_url` must be absolute `http(s)://` or a `/`-relative path with no whitespace (blocks `javascript:`/`data:`); `support_email` must look like an email; empty string clears a field.
+- `GET /api/settings` returns the branding fields plus `white_label_note` (scope disclaimer).
+- `GET /api/public/landing/{slug}` now also returns `brand_name`, `logo_url`, `primary_color`, `support_email`, `footer_text`, `hide_platform_brand` — display fields only, still no owner personal data.
+- Frontend: landing page shows logo/brand name (fallback: business name), accent button colour, support email, custom footer; `hide_platform_brand` removes the "Powered by LeadCraft AI" footer. Dashboard sidebar uses the brand name/logo and accent colour; when hidden it falls back to the business name. Login screen is pre-auth and therefore not branded (stated honestly).
+
+## Live (P3 #3 — manual billing ledger v1)
+**No payment processing exists.** Rows record what the owner/admin says was paid; no card data, no gateway, no auto-charge, no enforcement.
+
+- Role gate: all `/api/billing` routes require **owner or admin** (agents and viewers → 403; viewers are blocked even for reads because amounts are financial).
+- `GET /api/billing` — `plan_tier`, `plan_tiers` (basic|pro|agency), `entries[]`, `entry_count`, `totals_by_currency` (summed **per currency**, never converted), `latest_paid_until`, and three honesty notes.
+- `POST /api/billing` — `{amount>0, currency (2–10, uppercased, default PKR), period_start?, period_end?, paid_until?, note?}`; 400 on `amount<=0`, unknown/short currency, or `period_end < period_start`. 201 returns the entry.
+- `PATCH /api/billing/plan` — `{plan_tier}` ∈ basic|pro|agency; updates `users.plan_tier` (the single plan field) and returns "no charge / no limits enforced". It never creates a ledger row.
+- `DELETE /api/billing/{id}` — owner/admin, tenant-scoped 404, 204.
+- Frontend: Settings "Billing ledger (manual)" card — plan label selector, entries table with delete, add-payment form (amount/currency/dates/note), grouped totals, honest disclaimers. Non-owner/admin sees an "owner or admin role required" notice.
+
 ## Ground rules encoded in contracts (Section 0 of the roadmap)
 - Every lead write requires a `source` from the allowlist and a `consent_timestamp`.
 - No endpoint creates outbound-first contact. `messages.direction=in` rows must exist before the bot replies.

@@ -71,9 +71,12 @@ B2B visitor identification via a vetted provider (optional, off by default); voi
 Agency workspaces, white-label, billing, enterprise permissions. Plan:
 `docs/p3-plan.md`. Shipped: **team members & roles v1** (`workspace_members`,
 owner-scoped membership resolution, viewer/agent write gates, token invites
-with no email sending). Next: white-label branding, manual billing ledger.
-Agency multi-workspace remains design-only until approved (requires a
-`workspace_id` migration across all data tables).
+with no email sending), **white-label branding v1** (brand name/logo/colour/
+footer/support email, platform-brand toggle on the dashboard and landing
+page), and **manual billing ledger v1** (owner/admin-recorded payments,
+currency-grouped totals, plan label — no gateway, no enforcement). Agency
+multi-workspace remains design-only until approved (requires a `workspace_id`
+migration across all data tables).
 
 ---
 

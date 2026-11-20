@@ -125,6 +125,13 @@ def test_public_landing_config_display_fields_only(client, owner_headers):
         "show_property_fields": False,
         "business_type": "",
         "extra_fields": [],
+        # P3 #2 white-label defaults (presentation only, empty = not set).
+        "brand_name": "",
+        "logo_url": "",
+        "primary_color": "",
+        "support_email": "",
+        "footer_text": "",
+        "hide_platform_brand": False,
         # P1 A/B: no variants exist -> control served, no override payload.
         "ab_variant": "control",
         "variant": None,

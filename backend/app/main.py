@@ -11,6 +11,7 @@ from app.api.admin import router as admin_router
 from app.api.analytics import router as analytics_router
 from app.api.attribution import router as attribution_router
 from app.api.auth import router as auth_router
+from app.api.billing import router as billing_router
 from app.api.content import router as content_router
 from app.api.health import router as health_router
 from app.api.icp import router as icp_router
@@ -116,6 +117,7 @@ def create_app() -> FastAPI:
     app.include_router(scoring_feedback_router)
     app.include_router(timeline_router)
     app.include_router(team_router)
+    app.include_router(billing_router)
     app.include_router(admin_router)
 
     # MVP convenience: create tables on boot. Replace with Alembic before

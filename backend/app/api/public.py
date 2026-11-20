@@ -72,6 +72,13 @@ def landing_config(slug: str, variant: str | None = None, db: Session = Depends(
         "show_property_fields": bool(row.show_property_fields),
         "business_type": row.business_type or "",
         "extra_fields": extra_fields,
+        # P3 #2 white-label presentation (public display fields only).
+        "brand_name": row.brand_name or "",
+        "logo_url": row.logo_url or "",
+        "primary_color": row.primary_color or "",
+        "support_email": row.support_email or "",
+        "footer_text": row.footer_text or "",
+        "hide_platform_brand": bool(row.hide_platform_brand),
         "ab_variant": assigned,
         "variant": variant_payload,
     }

@@ -25,10 +25,10 @@ The zero-cost, additive modules below ship first.
    owner stays the data scope. No new tenancy tables.
 2. **White-label branding v1** — brand name, logo URL, primary colour, support
    email, footer text, "hide platform brand" toggle on the app + landing
-   page. Presentation only; billing state is not implied.
+   page. Presentation only; billing state is not implied. **Shipped.**
 3. **Manual billing ledger v1** — owner/admin-entered plan + invoice/payment
    rows (amount, currency, period, paid-until). **No payment gateway, no card
-   data, no auto-charging.** The UI states this plainly.
+   data, no auto-charging.** The UI states this plainly. **Shipped.**
 4. *(Design-only, approval gate)* **Agency multi-workspace** — account vs
    workspace split, `workspace_id` migration path, cost/effort estimate. No
    code until approved.
@@ -99,7 +99,7 @@ gate; owner/admin-only team management; self-role and self-remove refusal;
 cross-workspace 404/403; invite of an account that already owns leads -> 409;
 wrong-email acceptance -> 403; unauthenticated 401.
 
-## Module 2 scope — white-label v1 (next increment)
+## Module 2 scope — white-label v1 (shipped)
 `ClientSettings` additions (`brand_name`, `logo_url`, `primary_color`,
 `support_email`, `footer_text`, `hide_platform_brand`) + GET/PATCH wiring in
 `/api/settings` (owner/admin/manager only) + rendering on the dashboard shell,
@@ -107,7 +107,7 @@ login screen and `/l/<slug>`. Honest scope: this is presentation only; it
 does not create a separate tenant, custom domain, or remove the platform's
 legal footer text when a plan requires it.
 
-## Module 3 scope — manual billing ledger v1
+## Module 3 scope — manual billing ledger v1 (shipped)
 New `billing_entries` table: `user_id, plan_tier, amount, currency,
 period_start, period_end, paid_until, note, created_at`, entered by
 owner/admin. `GET/POST/DELETE /api/billing` + a Settings card. Labels state

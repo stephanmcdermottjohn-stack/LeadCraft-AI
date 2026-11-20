@@ -12,7 +12,7 @@ Design notes:
 """
 import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -60,6 +60,15 @@ class ClientSettings(Base):
     # weights never rewrites old snapshots (each history row keeps its own
     # reason breakdown).
     scoring_weights_json: Mapped[str] = mapped_column(Text, default="")
+    # P3 #2 white-label branding (presentation only: no separate tenant, no
+    # custom domain, no plan enforcement - the UI says so).
+    brand_name: Mapped[str] = mapped_column(String(200), default="")
+    logo_url: Mapped[str] = mapped_column(String(500), default="")
+    # #RRGGBB or "" (default theme).
+    primary_color: Mapped[str] = mapped_column(String(20), default="")
+    support_email: Mapped[str] = mapped_column(String(320), default="")
+    footer_text: Mapped[str] = mapped_column(String(300), default="")
+    hide_platform_brand: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     user: Mapped[User] = relationship(back_populates="settings")
@@ -468,3 +477,25 @@ class WorkspaceMember(Base):
     invite_token: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True, index=True)
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     accepted_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class BillingEntry(Base):
+    """Owner/admin-entered manual payment record (P3 #3).
+
+    This is a ledger, not a charge: no gateway, no card data, no auto-renewal.
+    Amounts are whatever the owner records; summary totals are grouped per
+    currency and never converted. `users.plan_tier` stays the only plan field
+    and is changed explicitly, not implied by a row.
+    """
+
+    __tablename__ = "billing_entries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    amount: Mapped[float] = mapped_column(Float)
+    currency: Mapped[str] = mapped_column(String(10), default="PKR")
+    period_start: Mapped[datetime.date | None] = mapped_column(Date, nullable=True)
+    period_end: Mapped[datetime.date | None] = mapped_column(Date, nullable=True)
+    paid_until: Mapped[datetime.date | None] = mapped_column(Date, nullable=True)
+    note: Mapped[str] = mapped_column(String(500), default="")
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
