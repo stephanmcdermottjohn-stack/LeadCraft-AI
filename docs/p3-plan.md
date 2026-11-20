@@ -31,7 +31,7 @@ The zero-cost, additive modules below ship first.
    data, no auto-charging.** The UI states this plainly. **Shipped.**
 4. *(Design-only, approval gate)* **Agency multi-workspace** — account vs
    workspace split, `workspace_id` migration path, cost/effort estimate. No
-   code until approved.
+   code until approved. Design: `docs/p3-agency-design.md`.
 
 ## Module 1 scope — team members & roles v1
 
