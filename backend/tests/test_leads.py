@@ -135,6 +135,19 @@ def test_public_landing_config_display_fields_only(client, owner_headers):
         # P1 A/B: no variants exist -> control served, no override payload.
         "ab_variant": "control",
         "variant": None,
+        # P5 #1: booking is off by default (public subset only).
+        "booking": {
+            "enabled": False,
+            "slot_minutes": 30,
+            "start": "10:00",
+            "end": "18:00",
+            "days": [],
+            "timezone": "Asia/Karachi",
+            "services": [],
+            "lead_minutes": 60,
+            "note": "",
+            "max_days_ahead": 60,
+        },
     }
     # No credentials, no other fields leak.
     assert "brand_voice" not in body

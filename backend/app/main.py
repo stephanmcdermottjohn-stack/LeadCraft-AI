@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app import db as db_module
 from app.api.admin import router as admin_router
 from app.api.analytics import router as analytics_router
+from app.api.appointments import router as appointments_router
 from app.api.attribution import router as attribution_router
 from app.api.auth import router as auth_router
 from app.api.billing import router as billing_router
@@ -121,6 +122,7 @@ def create_app() -> FastAPI:
     app.include_router(timeline_router)
     app.include_router(team_router)
     app.include_router(billing_router)
+    app.include_router(appointments_router)
     app.include_router(integrations_router)
     # Provider webhooks are public by design; they authenticate with an HMAC
     # signature, not a bearer token.

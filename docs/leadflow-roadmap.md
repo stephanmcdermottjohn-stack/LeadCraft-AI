@@ -88,6 +88,18 @@ label, lead + conversation + inbound message, no auto-reply). Unconfigured
 webhooks answer 503; unknown page/phone ids stay `unrouted` with no tenant.
 Activation needs the owner's Meta app credentials; no paid provider is used.
 
+### P5 #1 — Booking & appointments
+Plan: `docs/p5-plan.md`. Shipped: server-generated weekly slots in the workspace
+IANA timezone (weekdays, hours, 15–180 min slots, minimum notice, 60-day
+window), public booking on `/l/<slug>` (consent-first, forged/closed/taken times
+refused, lead reuse by phone then email), manual team entry with attested
+consent, and owner appointment management (statuses
+`booked/confirmed/completed/cancelled/no_show`, notes, manual reminder marker).
+**Zero cost, zero messaging:** the platform never sends a confirmation or
+reminder — `reminded_at` only records that the owner contacted the customer.
+Availability changes are owner/admin/manager; agents manage appointments;
+viewers are read-only.
+
 ---
 
 ## 4. Architecture Impact

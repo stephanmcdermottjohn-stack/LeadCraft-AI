@@ -182,6 +182,20 @@ Presentation only: no custom domain, no separate tenant, no plan enforcement (st
 - `DELETE /api/billing/{id}` — owner/admin, tenant-scoped 404, 204.
 - Frontend: Settings "Billing ledger (manual)" card — plan label selector, entries table with delete, add-payment form (amount/currency/dates/note), grouped totals, honest disclaimers. Non-owner/admin sees an "owner or admin role required" notice.
 
+## Live (P5 #1 — booking & appointments v1)
+Zero external cost. **The platform sends no SMS, email or WhatsApp confirmation/reminder**; `reminded_at` is a manual marker set by the owner. Full scope: `docs/p5-plan.md`.
+
+- `GET /api/appointments/availability` — auth, workspace-scoped. Returns `availability` (`enabled`, `days` 0=Mon…6=Sun, `start`/`end` `HH:MM`, `slot_minutes` 15–180, `lead_minutes`, `timezone` IANA, `services[]`, `note`, `max_days_ahead` 60, `disclaimer`) and `can_edit` (owner/admin/manager).
+- `PATCH /api/appointments/availability` — **owner/admin/manager** (agent → 403). Validation: days 0–6; `HH:MM` start/end with `end > start`; slot 15–180; notice 0–10080; valid IANA timezone; ≤10 services; enabling with zero working days → 400.
+- `GET /api/appointments/slots?date=YYYY-MM-DD` — auth, owner preview of the public slot list.
+- `GET /api/appointments?status=&date_from=&date_to=&limit=` — auth, tenant-scoped, soonest first. Rows carry `starts_at`/`ends_at` (UTC ISO), `service`, `source` (`public_booking`|`manual`), `status` (`booked|confirmed|completed|cancelled|no_show`), `owner_notes`, `reminded_at`, and the linked lead's name/phone/email. Also returns `timezone` + honesty `note`.
+- `POST /api/appointments` — auth, 201, manual (phone/walk-in) entry. Body `{starts_at (future), name, phone?, email?, service?, notes?, consent: true}`; missing consent or contact → 400, taken slot → 409. Creates/reuses a lead with `source="direct_message"`, `metadata.entry_point="manual_appointment"`, server-side `consent_timestamp`.
+- `PATCH /api/appointments/{id}` — auth, tenant-404. `{status?, owner_notes?, reminded?}`; unknown status → 400; every status change appends a `LeadActivity`.
+- `GET /api/public/landing/{slug}/slots?date=` — **public**. Server-generated slots only: booking disabled → `enabled:false` + empty list; closed weekday, past date, or beyond 60 days → empty; malformed date → 400; unknown slug → 404. Returns `services`, `slot_minutes`, `timezone`, and a hint that no message is sent by the platform.
+- `POST /api/public/landing/{slug}/book` — **public**, 201. Body `{starts_at, name, phone?, email?, service?, intent_notes?, consent: true, company? (honeypot)}`. Consent required (400); at least one contact required; the time must be one of the server's current slots (forged/closed/too-soon → 409); same start already active → 409. New lead: `source="landing_page"`, `metadata.entry_point="booking"`, server-side `consent_timestamp`; repeat phone/email reuses the lead. Response includes the local label and the explicit "platform does not send confirmation or reminder messages" statement.
+- `GET /api/public/landing/{slug}` now also returns `booking` (public availability subset — no owner data).
+- Frontend: **Appointments** nav — availability editor, appointment table with status/reminder actions, manual add form; landing page offers a booking mode when enabled (date → slots → details/consent → confirmation).
+
 ## Ground rules encoded in contracts (Section 0 of the roadmap)
 - Every lead write requires a `source` from the allowlist and a `consent_timestamp`.
 - No endpoint creates outbound-first contact. `messages.direction=in` rows must exist before the bot replies.

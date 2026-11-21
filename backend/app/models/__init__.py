@@ -74,6 +74,20 @@ class ClientSettings(Base):
     # Stored per workspace so shared webhook URLs can be routed honestly.
     meta_page_id: Mapped[str] = mapped_column(String(64), default="")
     whatsapp_phone_number_id: Mapped[str] = mapped_column(String(64), default="")
+    # P5 #1 booking & appointments (zero-cost: no SMS/email is ever sent).
+    booking_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    booking_slot_minutes: Mapped[int] = mapped_column(Integer, default=30)
+    # Local business hours "HH:MM" in booking_timezone.
+    booking_start: Mapped[str] = mapped_column(String(5), default="10:00")
+    booking_end: Mapped[str] = mapped_column(String(5), default="18:00")
+    # JSON array of weekdays (0=Monday ... 6=Sunday). Empty = not bookable.
+    booking_days_json: Mapped[str] = mapped_column(Text, default="[]")
+    booking_timezone: Mapped[str] = mapped_column(String(64), default="Asia/Karachi")
+    # JSON array of service names shown in the booking form (max 10).
+    booking_services_json: Mapped[str] = mapped_column(Text, default="[]")
+    # Minimum notice before a slot can be booked, in minutes.
+    booking_lead_minutes: Mapped[int] = mapped_column(Integer, default=60)
+    booking_note: Mapped[str] = mapped_column(String(300), default="")
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     user: Mapped[User] = relationship(back_populates="settings")
@@ -537,3 +551,37 @@ class WebhookEvent(Base):
     error: Mapped[str] = mapped_column(String(500), default="")
     received_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     processed_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class Appointment(Base):
+    """Owner-managed appointment created from the public landing page or added
+    manually by the team (P5 #1).
+
+    The platform never sends a confirmation, reminder or cancellation message:
+    `reminded_at` is a manual marker the owner sets after contacting the
+    customer through their own channel. Times are stored in UTC; the workspace
+    timezone in `clients_settings` is used for display and slot generation.
+    """
+
+    __tablename__ = "appointments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    lead_id: Mapped[int] = mapped_column(ForeignKey("leads.id"), index=True)
+    starts_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), index=True)
+    ends_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True))
+    # Free text service label chosen from the workspace's service list.
+    service: Mapped[str] = mapped_column(String(100), default="")
+    # public_booking | manual (only those two can create a row)
+    source: Mapped[str] = mapped_column(String(30), default="public_booking")
+    # booked | confirmed | completed | cancelled | no_show
+    status: Mapped[str] = mapped_column(String(20), default="booked", index=True)
+    owner_notes: Mapped[str] = mapped_column(String(1000), default="")
+    # Manual marker only - the platform sends nothing.
+    reminded_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    lead: Mapped[Lead] = relationship()

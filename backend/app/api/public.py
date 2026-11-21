@@ -3,15 +3,17 @@
 Exposes ONLY business-facing display fields — never personal data, never
 credentials, never other clients' rows.
 """
+import datetime
 import random
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.models import ClientSettings, LandingEvent, LandingVariant, User
-from app.services import analytics, business_types
+from app.services import analytics, booking as booking_svc, business_types
 
 router = APIRouter(prefix="/api/public")
 
@@ -81,6 +83,89 @@ def landing_config(slug: str, variant: str | None = None, db: Session = Depends(
         "hide_platform_brand": bool(row.hide_platform_brand),
         "ab_variant": assigned,
         "variant": variant_payload,
+        # P5 #1: booking widget is shown only when the owner enabled it.
+        "booking": booking_svc.landing_booking_config(row),
+    }
+
+
+class BookingBody(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    phone: str = Field(default="", max_length=50)
+    email: str = Field(default="", max_length=320)
+    service: str = Field(default="", max_length=100)
+    intent_notes: str = Field(default="", max_length=2000)
+    starts_at: datetime.datetime
+    consent: bool
+    # Honeypot: same silent reject as the capture form.
+    company: str = Field(default="", max_length=200)
+
+
+@router.get("/landing/{slug}/slots")
+def booking_slots(slug: str, date: str = "", db: Session = Depends(get_db)) -> dict:
+    row = db.scalar(select(ClientSettings).where(ClientSettings.landing_slug == slug))
+    if row is None:
+        raise HTTPException(status_code=404, detail="Unknown business page.")
+    if not row.booking_enabled:
+        return {"enabled": False, "date": date, "timezone": row.booking_timezone, "slots": []}
+    if not date:
+        try:
+            tz = booking_svc.timezone_of(row)
+            date = datetime.datetime.now(tz).date().isoformat()
+        except booking_svc.BookingError as exc:
+            raise HTTPException(status_code=exc.status, detail=str(exc))
+    try:
+        slots = booking_svc.slots_for_date(db, row, date)
+    except booking_svc.BookingError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc))
+    return {
+        "enabled": True,
+        "date": date,
+        "timezone": row.booking_timezone,
+        "slot_minutes": int(row.booking_slot_minutes or 30),
+        "services": booking_svc.parse_services(row.booking_services_json),
+        "hint": "Times are shown in the business's timezone. No confirmation message is sent by the platform.",
+        "slots": slots,
+    }
+
+
+@router.post("/landing/{slug}/book", status_code=201)
+def book_appointment(slug: str, body: BookingBody, db: Session = Depends(get_db)) -> dict:
+    if body.company:
+        raise HTTPException(status_code=400, detail="Invalid submission.")
+    row = db.scalar(select(ClientSettings).where(ClientSettings.landing_slug == slug))
+    if row is None:
+        raise HTTPException(status_code=404, detail="Unknown business page.")
+    try:
+        appointment, lead, created = booking_svc.create_booking(
+            db,
+            row,
+            starts_at=body.starts_at,
+            name=body.name,
+            phone=body.phone,
+            email=body.email,
+            service=body.service,
+            intent_notes=body.intent_notes,
+            consent=body.consent,
+        )
+    except booking_svc.BookingError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc))
+    db.commit()
+    tz = booking_svc.timezone_of(row)
+    local = appointment.starts_at
+    if local.tzinfo is None:
+        local = local.replace(tzinfo=datetime.timezone.utc)
+    local = local.astimezone(tz)
+    return {
+        "appointment": {
+            "starts_at": appointment.starts_at.isoformat(),
+            "ends_at": appointment.ends_at.isoformat(),
+            "label": local.strftime("%A, %d %b · %I:%M %p").replace(" 0", " "),
+            "service": appointment.service,
+            "status": appointment.status,
+        },
+        "lead_created": created,
+        "message": "Appointment requested. The business will contact you to confirm - "
+        "the platform does not send confirmation or reminder messages.",
     }
 
 

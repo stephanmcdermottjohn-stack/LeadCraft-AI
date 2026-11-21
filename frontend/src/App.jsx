@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { api, apiBaseUrl, clearSession, getToken, getUser, setSession } from "./api/client";
 
 const PLATFORMS = ["facebook", "instagram", "tiktok", "whatsapp_status", "other"];
-const NAV_ITEMS = ["Dashboard", "Content", "Leads", "Conversations", "Reports", "Settings"];
+const NAV_ITEMS = ["Dashboard", "Content", "Leads", "Appointments", "Conversations", "Reports", "Settings"];
 
 // Business templates (mirrors backend/app/services/business_types.py keys).
 // Selecting one prefills a niche suggestion and turns on the landing extras.
@@ -1675,6 +1675,62 @@ function LandingPage({ slug }) {
     }
   };
 
+  // P5 #1 booking widget. Slots come from the server (business timezone);
+  // the browser only picks a date and one of the returned starts.
+  const [mode, setMode] = useState("request");
+  const [bookingDate, setBookingDate] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    return d.toISOString().slice(0, 10);
+  });
+  const [slots, setSlots] = useState([]);
+  const [slotLoading, setSlotLoading] = useState(false);
+  const [selectedSlot, setSelectedSlot] = useState(null);
+  const [bookingForm, setBookingForm] = useState({ name: "", phone: "", email: "", service: "", intent_notes: "" });
+  const [bookingConsent, setBookingConsent] = useState(false);
+  const [bookingDone, setBookingDone] = useState(null);
+  const [bookingError, setBookingError] = useState("");
+
+  useEffect(() => {
+    if (mode !== "book" || !config?.booking?.enabled || !bookingDate) return;
+    setSlotLoading(true);
+    setSelectedSlot(null);
+    api(`/api/public/landing/${encodeURIComponent(slug)}/slots?date=${encodeURIComponent(bookingDate)}`)
+      .then((b) => setSlots(b.slots || []))
+      .catch(() => setSlots([]))
+      .finally(() => setSlotLoading(false));
+  }, [mode, bookingDate, slug, config]);
+
+  const submitBooking = async (e) => {
+    e.preventDefault();
+    if (!selectedSlot) {
+      setBookingError("Pick an available time slot first.");
+      return;
+    }
+    setBusy(true);
+    setBookingError("");
+    try {
+      const b = await api(`/api/public/landing/${encodeURIComponent(slug)}/book`, {
+        method: "POST",
+        body: JSON.stringify({
+          ...bookingForm,
+          starts_at: selectedSlot.starts_at,
+          consent: bookingConsent,
+          company,
+        }),
+      });
+      track("submit");
+      setBookingDone(b);
+      setSlots((list) => list.filter((s) => s.starts_at !== selectedSlot.starts_at));
+    } catch (err) {
+      setBookingError(
+        err instanceof Error ? err.message.replace(/^API \d+: /, "") : "Booking failed. Please try another slot."
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
   if (config === null && !error) {
     return <div className="min-h-screen flex items-center justify-center text-slate-400 text-sm">Loading…</div>;
   }
@@ -1717,6 +1773,168 @@ function LandingPage({ slug }) {
               {brand} has received your request and will reach out soon.
             </p>
           </div>
+        ) : mode === "book" && config.booking?.enabled ? (
+          bookingDone ? (
+            <div className="text-center space-y-3 py-6">
+              <div className="text-4xl">📅</div>
+              <h1 className="text-xl font-bold">Appointment requested</h1>
+              <p className="text-sm text-slate-200">{bookingDone.appointment.label}</p>
+              {bookingDone.appointment.service && (
+                <p className="text-xs text-slate-400">{bookingDone.appointment.service}</p>
+              )}
+              <p className="text-sm text-slate-400">{bookingDone.message}</p>
+              <button
+                type="button"
+                className="text-xs text-slate-400 underline"
+                onClick={() => {
+                  setBookingDone(null);
+                  setSelectedSlot(null);
+                  setBookingConsent(false);
+                  track("form_start");
+                }}
+              >
+                Book another time
+              </button>
+            </div>
+          ) : (
+            <form onSubmit={submitBooking} className="space-y-4">
+              <div>
+                <button
+                  type="button"
+                  className="text-xs text-slate-400 underline"
+                  onClick={() => setMode("request")}
+                >
+                  ← Request a callback instead
+                </button>
+                <h1 className="mt-2 text-2xl font-bold">Book an appointment</h1>
+                <p className="text-sm text-slate-400">
+                  {config.booking.note || `${brand} · pick a time that suits you`}
+                </p>
+                <p className="mt-1 text-[10px] text-slate-500">
+                  Times are in {config.booking.timezone}; the business confirms your request personally.
+                </p>
+              </div>
+              <label className="block text-sm">
+                Date
+                <input
+                  type="date"
+                  className="mt-1 block w-full rounded-lg bg-slate-800 px-3 py-2"
+                  value={bookingDate}
+                  min={new Date().toISOString().slice(0, 10)}
+                  onChange={(e) => setBookingDate(e.target.value)}
+                />
+              </label>
+              <div>
+                <p className="text-sm mb-1">Available times</p>
+                {slotLoading ? (
+                  <p className="text-xs text-slate-500">Loading slots…</p>
+                ) : slots.length === 0 ? (
+                  <p className="text-xs text-slate-500">No slots on this day — try another date.</p>
+                ) : (
+                  <div className="grid grid-cols-3 gap-1">
+                    {slots.map((s) => {
+                      const selected = selectedSlot?.starts_at === s.starts_at;
+                      return (
+                        <button
+                          key={s.starts_at}
+                          type="button"
+                          className={`rounded px-2 py-1 text-xs ${selected ? "text-white" : "bg-slate-800 text-slate-200"}`}
+                          style={selected ? { backgroundColor: accent || "#0284c7" } : undefined}
+                          onClick={() => setSelectedSlot(s)}
+                        >
+                          {s.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+              {(config.booking.services || []).length > 0 && (
+                <label className="block text-sm">
+                  Service
+                  <select
+                    className="mt-1 block w-full rounded-lg bg-slate-800 px-3 py-2"
+                    value={bookingForm.service}
+                    onChange={(e) => setBookingForm({ ...bookingForm, service: e.target.value })}
+                  >
+                    <option value="">—</option>
+                    {config.booking.services.map((s) => (
+                      <option key={s} value={s}>{s}</option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              <label className="block text-sm">
+                Your name
+                <input
+                  className="mt-1 block w-full rounded-lg bg-slate-800 px-3 py-2"
+                  value={bookingForm.name}
+                  onChange={(e) => setBookingForm({ ...bookingForm, name: e.target.value })}
+                  required
+                />
+              </label>
+              <label className="block text-sm">
+                Phone
+                <input
+                  className="mt-1 block w-full rounded-lg bg-slate-800 px-3 py-2"
+                  value={bookingForm.phone}
+                  onChange={(e) => setBookingForm({ ...bookingForm, phone: e.target.value })}
+                />
+              </label>
+              <label className="block text-sm">
+                Email (optional)
+                <input
+                  type="email"
+                  className="mt-1 block w-full rounded-lg bg-slate-800 px-3 py-2"
+                  value={bookingForm.email}
+                  onChange={(e) => setBookingForm({ ...bookingForm, email: e.target.value })}
+                />
+              </label>
+              <label className="block text-sm">
+                Anything we should know? (optional)
+                <textarea
+                  className="mt-1 block w-full rounded-lg bg-slate-800 px-3 py-2"
+                  rows={2}
+                  value={bookingForm.intent_notes}
+                  onChange={(e) => setBookingForm({ ...bookingForm, intent_notes: e.target.value })}
+                />
+              </label>
+              <input
+                aria-hidden="true"
+                tabIndex={-1}
+                autoComplete="off"
+                className="absolute opacity-0 h-0 w-0"
+                placeholder="Company"
+                value={company}
+                onChange={(e) => setCompany(e.target.value)}
+              />
+              <label className="flex items-start gap-2 text-xs text-slate-300">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={bookingConsent}
+                  onChange={(e) => setBookingConsent(e.target.checked)}
+                  required
+                />
+                <span>
+                  I agree that {brand} may contact me about this appointment. My consent and the booking time are
+                  recorded.
+                </span>
+              </label>
+              {bookingError && <p className="text-xs text-red-400">{bookingError}</p>}
+              <button
+                className={`w-full rounded-lg py-2 text-sm font-semibold ${accent ? "" : "bg-sky-600 hover:bg-sky-500"} disabled:opacity-50`}
+                style={accent ? { backgroundColor: accent } : undefined}
+                disabled={busy || !bookingConsent || !selectedSlot}
+              >
+                {busy ? "Booking…" : "Request this slot"}
+              </button>
+              <p className="text-[10px] text-slate-500 text-center">
+                The platform sends no confirmation or reminder message — the business will contact you.
+              </p>
+              {footer && <p className="text-[10px] text-slate-500 text-center">{footer}</p>}
+            </form>
+          )
         ) : (
           <form
             onSubmit={submit}
@@ -1794,6 +2012,24 @@ function LandingPage({ slug }) {
               value={company}
               onChange={(e) => setCompany(e.target.value)}
             />
+            {config.booking?.enabled && (
+              <div className="rounded-lg border border-slate-800 bg-slate-950 p-3 space-y-1">
+                <p className="text-xs font-semibold text-slate-200">Prefer a fixed time?</p>
+                <p className="text-[11px] text-slate-500">
+                  Pick an appointment slot instead of a callback.
+                </p>
+                <button
+                  type="button"
+                  className="rounded bg-slate-800 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-700"
+                  onClick={() => {
+                    setMode("book");
+                    track("form_start");
+                  }}
+                >
+                  Book an appointment
+                </button>
+              </div>
+            )}
             <label className="flex items-start gap-2 text-xs text-slate-300">
               <input
                 type="checkbox"
@@ -2709,6 +2945,374 @@ function InboxPanel() {
   );
 }
 
+const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+function AppointmentsPanel() {
+  const [availability, setAvailability] = useState(null);
+  const [canEdit, setCanEdit] = useState(true);
+  const [rows, setRows] = useState([]);
+  const [tz, setTz] = useState("Asia/Karachi");
+  const [statuses, setStatuses] = useState([]);
+  const [note, setNote] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [form, setForm] = useState({
+    enabled: false, days: [], start: "10:00", end: "18:00",
+    slot_minutes: 30, lead_minutes: 60, timezone: "Asia/Karachi", services: "", note: "",
+  });
+  const [manual, setManual] = useState({
+    name: "", phone: "", email: "", starts_at: "", service: "", notes: "", consent: false,
+  });
+
+  const clean = (e, fallback) =>
+    e instanceof Error ? e.message.replace(/^API \d+: /, "") : fallback;
+
+  const load = async () => {
+    setError("");
+    try {
+      const a = await api("/api/appointments/availability");
+      setAvailability(a.availability);
+      setCanEdit(a.can_edit);
+      setTz(a.availability.timezone);
+      setForm({
+        enabled: a.availability.enabled,
+        days: a.availability.days,
+        start: a.availability.start,
+        end: a.availability.end,
+        slot_minutes: a.availability.slot_minutes,
+        lead_minutes: a.availability.lead_minutes,
+        timezone: a.availability.timezone,
+        services: (a.availability.services || []).join(", "),
+        note: a.availability.note || "",
+      });
+      const b = await api("/api/appointments?limit=200");
+      setRows(b.appointments || []);
+      setStatuses(b.statuses || []);
+      setTz(b.timezone || a.availability.timezone);
+    } catch (e) {
+      setError(clean(e, "Appointments load failed."));
+    }
+  };
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  const saveAvailability = async () => {
+    setBusy(true);
+    setNote("");
+    setError("");
+    try {
+      const services = form.services.split(",").map((s) => s.trim()).filter(Boolean);
+      const b = await api("/api/appointments/availability", {
+        method: "PATCH",
+        body: JSON.stringify({
+          enabled: form.enabled,
+          days: form.days,
+          start: form.start,
+          end: form.end,
+          slot_minutes: Number(form.slot_minutes),
+          lead_minutes: Number(form.lead_minutes),
+          timezone: form.timezone,
+          services,
+          note: form.note,
+        }),
+      });
+      setAvailability(b.availability);
+      setTz(b.availability.timezone);
+      setNote("Booking settings saved.");
+    } catch (e) {
+      setError(clean(e, "Could not save booking settings."));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const setStatus = async (row, status) => {
+    setError("");
+    try {
+      const b = await api(`/api/appointments/${row.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status }),
+      });
+      setRows((list) => list.map((r) => (r.id === row.id ? b.appointment : r)));
+    } catch (e) {
+      setError(clean(e, "Status update failed."));
+    }
+  };
+
+  const markReminded = async (row) => {
+    setError("");
+    try {
+      const b = await api(`/api/appointments/${row.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ reminded: !row.reminded_at }),
+      });
+      setRows((list) => list.map((r) => (r.id === row.id ? b.appointment : r)));
+    } catch (e) {
+      setError(clean(e, "Reminder marker failed."));
+    }
+  };
+
+  const addManual = async () => {
+    setBusy(true);
+    setNote("");
+    setError("");
+    try {
+      const startsAt = manual.starts_at ? new Date(manual.starts_at).toISOString() : "";
+      const b = await api("/api/appointments", {
+        method: "POST",
+        body: JSON.stringify({
+          starts_at: startsAt,
+          name: manual.name,
+          phone: manual.phone,
+          email: manual.email,
+          service: manual.service,
+          notes: manual.notes,
+          consent: manual.consent,
+        }),
+      });
+      setNote(b.note);
+      setManual({ name: "", phone: "", email: "", starts_at: "", service: "", notes: "", consent: false });
+      load();
+    } catch (e) {
+      setError(clean(e, "Could not add the appointment."));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const fmt = (iso) => {
+    if (!iso) return "";
+    try {
+      return new Intl.DateTimeFormat("en-GB", {
+        timeZone: tz,
+        weekday: "short", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit",
+      }).format(new Date(iso));
+    } catch {
+      return iso;
+    }
+  };
+
+  const toggleDay = (day) =>
+    setForm((f) => ({
+      ...f,
+      days: f.days.includes(day) ? f.days.filter((d) => d !== day) : [...f.days, day].sort((a, b) => a - b),
+    }));
+
+  if (!availability && !error) {
+    return <div className="rounded-xl border border-slate-800 bg-slate-900 p-6 text-sm text-slate-400">Loading…</div>;
+  }
+
+  return (
+    <div className="space-y-6 max-w-4xl">
+      <div className="rounded-xl border border-slate-800 bg-slate-900 p-6 space-y-4">
+        <h3 className="font-semibold">Booking availability</h3>
+        <p className="text-xs text-slate-500">
+          Slots are generated server-side from these hours (timezone: {tz}). The platform sends no SMS, email or
+          WhatsApp confirmations or reminders — the deadline reminder below is a manual marker only.
+        </p>
+
+        {!canEdit && (
+          <p className="text-xs text-amber-400">Your role can view appointments but not change booking settings.</p>
+        )}
+
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={form.enabled}
+            disabled={!canEdit}
+            onChange={(e) => setForm({ ...form, enabled: e.target.checked })}
+          />
+          Enable booking on the landing page
+        </label>
+
+        <div className="flex flex-wrap gap-2">
+          {DAY_LABELS.map((label, idx) => (
+            <button
+              key={label}
+              type="button"
+              disabled={!canEdit}
+              onClick={() => toggleDay(idx)}
+              className={`rounded px-2 py-1 text-xs ${
+                form.days.includes(idx) ? "bg-sky-700 text-white" : "bg-slate-800 text-slate-300"
+              } disabled:opacity-50`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+          <label className="text-slate-400">
+            Opens
+            <input type="time" disabled={!canEdit} className="mt-1 block w-full rounded bg-slate-800 px-2 py-1"
+              value={form.start} onChange={(e) => setForm({ ...form, start: e.target.value })} />
+          </label>
+          <label className="text-slate-400">
+            Closes
+            <input type="time" disabled={!canEdit} className="mt-1 block w-full rounded bg-slate-800 px-2 py-1"
+              value={form.end} onChange={(e) => setForm({ ...form, end: e.target.value })} />
+          </label>
+          <label className="text-slate-400">
+            Slot length
+            <select disabled={!canEdit} className="mt-1 block w-full rounded bg-slate-800 px-2 py-1"
+              value={form.slot_minutes} onChange={(e) => setForm({ ...form, slot_minutes: e.target.value })}>
+              {[15, 30, 45, 60, 90, 120].map((m) => <option key={m} value={m}>{m} min</option>)}
+            </select>
+          </label>
+          <label className="text-slate-400">
+            Minimum notice
+            <select disabled={!canEdit} className="mt-1 block w-full rounded bg-slate-800 px-2 py-1"
+              value={form.lead_minutes} onChange={(e) => setForm({ ...form, lead_minutes: e.target.value })}>
+              <option value={0}>None</option>
+              <option value={30}>30 min</option>
+              <option value={60}>1 hour</option>
+              <option value={240}>4 hours</option>
+              <option value={1440}>1 day</option>
+            </select>
+          </label>
+          <label className="text-slate-400 md:col-span-2">
+            Timezone (IANA)
+            <input disabled={!canEdit} className="mt-1 block w-full rounded bg-slate-800 px-2 py-1"
+              value={form.timezone} onChange={(e) => setForm({ ...form, timezone: e.target.value })} />
+          </label>
+          <label className="text-slate-400 md:col-span-2">
+            Services (comma separated, max 10)
+            <input disabled={!canEdit} className="mt-1 block w-full rounded bg-slate-800 px-2 py-1"
+              value={form.services} onChange={(e) => setForm({ ...form, services: e.target.value })} />
+          </label>
+          <label className="text-slate-400 md:col-span-4">
+            Booking note shown to visitors
+            <input disabled={!canEdit} className="mt-1 block w-full rounded bg-slate-800 px-2 py-1"
+              value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} />
+          </label>
+        </div>
+
+        {canEdit && (
+          <button
+            className="rounded bg-slate-800 px-3 py-1.5 text-sm hover:bg-slate-700 disabled:opacity-50"
+            onClick={saveAvailability}
+            disabled={busy}
+          >
+            Save booking settings
+          </button>
+        )}
+      </div>
+
+      <div className="rounded-xl border border-slate-800 bg-slate-900 p-6 space-y-3">
+        <h3 className="font-semibold">Appointments</h3>
+        <p className="text-xs text-slate-500">
+          Times shown in {tz}. {availability?.disclaimer}
+        </p>
+        {rows.length === 0 ? (
+          <p className="text-xs text-slate-500">No appointments yet.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead className="text-slate-500">
+                <tr>
+                  <th className="text-left font-normal pb-1">When</th>
+                  <th className="text-left font-normal pb-1 pl-2">Customer</th>
+                  <th className="text-left font-normal pb-1 pl-2">Service</th>
+                  <th className="text-left font-normal pb-1 pl-2">Status</th>
+                  <th className="text-left font-normal pb-1 pl-2">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.id} className="border-t border-slate-800 align-top">
+                    <td className="py-2 text-slate-300">
+                      {fmt(r.starts_at)}
+                      {r.source === "manual" && <span className="block text-[10px] text-slate-500">team entered</span>}
+                    </td>
+                    <td className="py-2 pl-2">
+                      <span className="block text-slate-200">{r.lead_name}</span>
+                      <span className="block text-slate-500">{r.lead_phone || r.lead_email}</span>
+                    </td>
+                    <td className="py-2 pl-2 text-slate-400">{r.service || "—"}</td>
+                    <td className="py-2 pl-2">
+                      <span className="text-slate-300">{r.status}</span>
+                      {r.reminded_at && <span className="block text-[10px] text-emerald-400">reminder sent (manual)</span>}
+                    </td>
+                    <td className="py-2 pl-2">
+                      <div className="flex flex-wrap gap-2">
+                        {statuses.filter((s) => s !== r.status).map((s) => (
+                          <button key={s} className="text-sky-300 hover:text-sky-200" onClick={() => setStatus(r, s)}>
+                            {s.replace("_", " ")}
+                          </button>
+                        ))}
+                        <button className="text-slate-400 hover:text-slate-200" onClick={() => markReminded(r)}>
+                          {r.reminded_at ? "reminder ✓" : "mark reminder"}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div className="rounded-xl border border-slate-800 bg-slate-900 p-6 space-y-3">
+        <h3 className="font-semibold">Add an appointment (phone / walk-in)</h3>
+        <p className="text-xs text-slate-500">
+          For customers who booked through a call or in person. Consent must be attested; the lead is created or reused.
+          Time is entered in your device timezone and stored in UTC.
+        </p>
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-xs">
+          <label className="text-slate-400">
+            Name
+            <input className="mt-1 block w-full rounded bg-slate-800 px-2 py-1" value={manual.name}
+              onChange={(e) => setManual({ ...manual, name: e.target.value })} />
+          </label>
+          <label className="text-slate-400">
+            Phone
+            <input className="mt-1 block w-full rounded bg-slate-800 px-2 py-1" value={manual.phone}
+              onChange={(e) => setManual({ ...manual, phone: e.target.value })} />
+          </label>
+          <label className="text-slate-400">
+            Email
+            <input className="mt-1 block w-full rounded bg-slate-800 px-2 py-1" value={manual.email}
+              onChange={(e) => setManual({ ...manual, email: e.target.value })} />
+          </label>
+          <label className="text-slate-400">
+            Date &amp; time
+            <input type="datetime-local" className="mt-1 block w-full rounded bg-slate-800 px-2 py-1" value={manual.starts_at}
+              onChange={(e) => setManual({ ...manual, starts_at: e.target.value })} />
+          </label>
+          <label className="text-slate-400">
+            Service
+            <select className="mt-1 block w-full rounded bg-slate-800 px-2 py-1" value={manual.service}
+              onChange={(e) => setManual({ ...manual, service: e.target.value })}>
+              <option value="">—</option>
+              {(availability?.services || []).map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </label>
+          <label className="text-slate-400">
+            Notes
+            <input className="mt-1 block w-full rounded bg-slate-800 px-2 py-1" value={manual.notes}
+              onChange={(e) => setManual({ ...manual, notes: e.target.value })} />
+          </label>
+        </div>
+        <label className="flex items-start gap-2 text-xs text-slate-300">
+          <input type="checkbox" className="mt-0.5" checked={manual.consent}
+            onChange={(e) => setManual({ ...manual, consent: e.target.checked })} />
+          <span>The customer agreed to be contacted and booked through this business.</span>
+        </label>
+        <button className="rounded bg-emerald-800 px-3 py-1.5 text-sm hover:bg-emerald-700 disabled:opacity-50"
+          onClick={addManual} disabled={busy}>
+          Add appointment
+        </button>
+      </div>
+
+      {note && <p className="text-xs text-emerald-400">{note}</p>}
+      {error && <p className="text-xs text-rose-400">{error}</p>}
+    </div>
+  );
+}
+
 function ReportsPanel() {
   const [data, setData] = useState(null);
   const [reviews, setReviews] = useState(null);
@@ -3199,6 +3803,7 @@ function DashboardApp() {
         )}
         {active === "Content" && <ContentPanel />}
         {active === "Leads" && <LeadsPanel />}
+        {active === "Appointments" && <AppointmentsPanel />}
         {active === "Reports" && <ReportsPanel />}
         {active === "Settings" && <SettingsPanel user={user} onLogout={logout} />}
         {active === "Admin" && <AdminPanel />}
