@@ -19,4 +19,7 @@ dist/
 .DS_Store
 Thumbs.db
 
+# Logs
+*.log
+
 .vercel-token

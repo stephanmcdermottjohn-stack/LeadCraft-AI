@@ -16,6 +16,7 @@ from app.api.content import router as content_router
 from app.api.health import router as health_router
 from app.api.icp import router as icp_router
 from app.api.inbox import router as inbox_router
+from app.api.integrations import router as integrations_router
 from app.api.landing_ab import router as landing_ab_router
 from app.api.leads import router as leads_router
 from app.api.nurture import router as nurture_router
@@ -27,6 +28,8 @@ from app.api.reviews import router as reviews_router
 from app.api.scoring import leads_router as scoring_leads_router, scoring_router as scoring_feedback_router
 from app.api.timeline import router as timeline_router
 from app.api.team import router as team_router
+from app.api.webhooks_meta import router as webhooks_meta_router
+from app.api.webhooks_whatsapp import router as webhooks_whatsapp_router
 from app.api.settings import router as settings_router
 from app.config import get_settings
 from app.models import Base
@@ -118,6 +121,11 @@ def create_app() -> FastAPI:
     app.include_router(timeline_router)
     app.include_router(team_router)
     app.include_router(billing_router)
+    app.include_router(integrations_router)
+    # Provider webhooks are public by design; they authenticate with an HMAC
+    # signature, not a bearer token.
+    app.include_router(webhooks_meta_router)
+    app.include_router(webhooks_whatsapp_router)
     app.include_router(admin_router)
 
     # MVP convenience: create tables on boot. Replace with Alembic before

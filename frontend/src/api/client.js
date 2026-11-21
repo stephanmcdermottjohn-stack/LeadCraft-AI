@@ -27,6 +27,11 @@ export function getUser() {
 // and API run as separate Vercel projects, so VITE_API_BASE points at the API.
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
 
+/** Absolute base for display-only URLs (webhook endpoints). */
+export function apiBaseUrl() {
+  return API_BASE || (typeof window !== "undefined" ? window.location.origin : "");
+}
+
 export async function api(path, options = {}) {
   const token = getToken();
   const headers = { "Content-Type": "application/json" };

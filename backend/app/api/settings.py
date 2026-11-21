@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.auth import get_current_user
+from app.config import get_settings
 from app.db import get_db
 from app.models import ClientSettings, User
 from app.services import business_types
@@ -20,6 +21,8 @@ SLUG_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{1,98}[a-z0-9])?$")
 RESERVED_SLUGS = {"api", "admin", "login", "register", "settings", "leads", "public", "l"}
 COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+# Meta page ids / WhatsApp phone number ids are numeric strings.
+META_ID_RE = re.compile(r"^[0-9]{5,64}$")
 
 
 class SettingsBody(BaseModel):
@@ -45,6 +48,9 @@ class SettingsBody(BaseModel):
     support_email: str | None = Field(default=None, max_length=320)
     footer_text: str | None = Field(default=None, max_length=300)
     hide_platform_brand: bool | None = None
+    # P4 integrations: routing ids, stored per workspace. "" = clear.
+    meta_page_id: str | None = Field(default=None, max_length=64)
+    whatsapp_phone_number_id: str | None = Field(default=None, max_length=64)
 
 
 def _slugify(text: str) -> str:
@@ -55,6 +61,33 @@ def _slugify(text: str) -> str:
 def _slug_taken(db: Session, slug: str, exclude_user_id: int) -> bool:
     row = db.scalar(select(ClientSettings).where(ClientSettings.landing_slug == slug))
     return row is not None and row.user_id != exclude_user_id
+
+
+def _integrations_public(s: ClientSettings) -> dict:
+    config = get_settings()
+    meta_verify = bool(config.meta_verify_token)
+    meta_secret = bool(config.meta_app_secret)
+    page_token = bool(config.meta_page_access_token)
+    return {
+        "meta_page_id": s.meta_page_id or "",
+        "whatsapp_phone_number_id": s.whatsapp_phone_number_id or "",
+        "meta_webhook_url": "/api/webhooks/meta",
+        "whatsapp_webhook_url": "/api/webhooks/whatsapp",
+        "meta_verify_token_configured": meta_verify,
+        "meta_app_secret_configured": meta_secret,
+        "meta_page_access_token_configured": page_token,
+        "whatsapp_access_token_configured": bool(config.whatsapp_access_token),
+        "meta_ready": bool(s.meta_page_id and meta_verify and meta_secret and page_token),
+        "whatsapp_ready": bool(s.whatsapp_phone_number_id and meta_verify and meta_secret),
+        "credentials_note": "Server credentials (App Secret, verify token, Page access token) are set as "
+        "environment variables; they are never returned to the browser.",
+        "notes": [
+            "Webhooks stay disabled (503) until the server App Secret is set.",
+            "Inbound only: no auto-reply and no outbound message is sent by the platform.",
+            "Unknown page / phone number ids are stored as 'unrouted' and are never assigned to a workspace.",
+            "Meta only delivers Lead Ads once the Page is subscribed to the app; do that in the Meta app dashboard.",
+        ],
+    }
 
 
 def _public(s: ClientSettings) -> dict:
@@ -74,6 +107,7 @@ def _public(s: ClientSettings) -> dict:
         "hide_platform_brand": bool(s.hide_platform_brand),
         "white_label_note": "Presentation only - no custom domain and no plan enforcement. "
         "The platform brand is hidden on your landing page and dashboard header when enabled.",
+        "integrations": _integrations_public(s),
     }
 
 
@@ -168,6 +202,20 @@ def update_settings(body: SettingsBody, user: User = Depends(get_current_user), 
         row.footer_text = body.footer_text.strip()
     if body.hide_platform_brand is not None:
         row.hide_platform_brand = bool(body.hide_platform_brand)
+
+    # P4 integration routing ids: numeric Meta ids only, empty clears.
+    if body.meta_page_id is not None:
+        value = body.meta_page_id.strip()
+        if value and not META_ID_RE.fullmatch(value):
+            raise HTTPException(status_code=400, detail="meta_page_id must be a numeric Meta Page id.")
+        row.meta_page_id = value
+    if body.whatsapp_phone_number_id is not None:
+        value = body.whatsapp_phone_number_id.strip()
+        if value and not META_ID_RE.fullmatch(value):
+            raise HTTPException(
+                status_code=400, detail="whatsapp_phone_number_id must be a numeric Cloud API phone number id."
+            )
+        row.whatsapp_phone_number_id = value
 
     db.commit()
     return {"settings": _public(row)}

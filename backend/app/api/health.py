@@ -19,5 +19,10 @@ def health() -> dict:
             "gemini_configured": bool(settings.gemini_api_key),
             "anthropic_configured": bool(settings.anthropic_api_key),
             "whatsapp_configured": bool(settings.whatsapp_access_token and settings.whatsapp_phone_number_id),
+            # P4: webhooks are off until the server credentials exist.
+            "meta_webhook_configured": bool(settings.meta_app_secret and settings.meta_verify_token),
+            "meta_leadgen_configured": bool(
+                settings.meta_app_secret and settings.meta_verify_token and settings.meta_page_access_token
+            ),
         },
     }

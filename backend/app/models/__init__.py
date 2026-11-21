@@ -69,6 +69,11 @@ class ClientSettings(Base):
     support_email: Mapped[str] = mapped_column(String(320), default="")
     footer_text: Mapped[str] = mapped_column(String(300), default="")
     hide_platform_brand: Mapped[bool] = mapped_column(Boolean, default=False)
+    # P4 integrations: the Meta Page whose Lead Ads this workspace owns, and
+    # the WhatsApp Cloud API phone number id it receives inbound messages on.
+    # Stored per workspace so shared webhook URLs can be routed honestly.
+    meta_page_id: Mapped[str] = mapped_column(String(64), default="")
+    whatsapp_phone_number_id: Mapped[str] = mapped_column(String(64), default="")
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     user: Mapped[User] = relationship(back_populates="settings")
@@ -499,3 +504,36 @@ class BillingEntry(Base):
     paid_until: Mapped[datetime.date | None] = mapped_column(Date, nullable=True)
     note: Mapped[str] = mapped_column(String(500), default="")
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class WebhookEvent(Base):
+    """Raw inbound webhook envelope + processing outcome (P4 #1).
+
+    Purpose is honesty and debugging: every provider delivery is stored before
+    it is interpreted, with an idempotency key so a provider retry cannot
+    create a duplicate lead/message. `user_id` stays NULL when the payload
+    could not be routed (unknown page / phone number) - such deliveries are
+    kept as `unrouted` instead of being silently attributed to someone.
+
+    status: received | processed | ignored | unrouted |
+            pending_credentials | error
+    A provider retry is detected by the unique key and is not stored again.
+    No payload is ever mutated after insert; this is an append-only log.
+    """
+
+    __tablename__ = "webhook_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # meta_leadgen | whatsapp
+    source: Mapped[str] = mapped_column(String(30), index=True)
+    # Provider-scoped idempotency key (e.g. leadgen_id, wa message id).
+    event_key: Mapped[str] = mapped_column(String(200), unique=True, index=True)
+    status: Mapped[str] = mapped_column(String(30), default="received", index=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    # Raw provider payload (capped before insert by the service).
+    payload_json: Mapped[str] = mapped_column(Text, default="{}")
+    signature_valid: Mapped[bool] = mapped_column(Boolean, default=False)
+    lead_id: Mapped[int | None] = mapped_column(ForeignKey("leads.id"), nullable=True)
+    error: Mapped[str] = mapped_column(String(500), default="")
+    received_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    processed_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -34,9 +34,21 @@ class Settings(BaseSettings):
 
     # Future paid provider (kept for Phase 2+ upgrade path; unused while budget=0).
     anthropic_api_key: str = ""
-    whatsapp_access_token: str = ""
-    whatsapp_phone_number_id: str = ""
+
+    # --- P4 integrations (all optional; every webhook is inactive until set) ---
+    # Meta app credentials. `meta_verify_token` is the random string typed into
+    # the Meta App webhook config; `meta_app_secret` verifies the
+    # X-Hub-Signature-256 HMAC; `meta_page_access_token` is used to fetch the
+    # full lead from Graph API after a leadgen notification.
+    meta_app_id: str = ""
+    meta_app_secret: str = ""
+    meta_page_access_token: str = ""
     meta_verify_token: str = ""
+    meta_api_version: str = "v21.0"
+    # WhatsApp Cloud API (official Meta product only).
+    whatsapp_access_token: str = ""
+    # Fallback phone number id (per-workspace value lives in ClientSettings).
+    whatsapp_phone_number_id: str = ""
     # Extra CORS origins for production (comma-separated), e.g. the Vercel
     # frontend domain when the API runs on a separate project.
     cors_origins: str = ""

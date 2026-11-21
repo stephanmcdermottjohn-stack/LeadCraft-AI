@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, clearSession, getToken, getUser, setSession } from "./api/client";
+import { api, apiBaseUrl, clearSession, getToken, getUser, setSession } from "./api/client";
 
 const PLATFORMS = ["facebook", "instagram", "tiktok", "whatsapp_status", "other"];
 const NAV_ITEMS = ["Dashboard", "Content", "Leads", "Conversations", "Reports", "Settings"];
@@ -1141,6 +1141,225 @@ function BillingCard() {
   );
 }
 
+function IntegrationsCard() {
+  const [integrations, setIntegrations] = useState(null);
+  const [events, setEvents] = useState([]);
+  const [retryable, setRetryable] = useState([]);
+  const [pageId, setPageId] = useState("");
+  const [phoneId, setPhoneId] = useState("");
+  const [denied, setDenied] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [error, setError] = useState("");
+
+  const clean = (e, fallback) =>
+    e instanceof Error ? e.message.replace(/^API \d+: /, "") : fallback;
+
+  const load = async () => {
+    try {
+      const s = await api("/api/settings");
+      const i = s.settings.integrations;
+      setIntegrations(i);
+      setPageId(i.meta_page_id || "");
+      setPhoneId(i.whatsapp_phone_number_id || "");
+    } catch (e) {
+      setError(clean(e, "Settings load failed."));
+    }
+    try {
+      const ev = await api("/api/integrations/events?limit=20");
+      setEvents(ev.events || []);
+      setRetryable(ev.retryable_statuses || []);
+    } catch (e) {
+      if (e.status === 403) setDenied(true);
+      else setError(clean(e, "Event log load failed."));
+    }
+  };
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  const save = async () => {
+    setBusy(true);
+    setMsg("");
+    setError("");
+    try {
+      const s = await api("/api/settings", {
+        method: "PATCH",
+        body: JSON.stringify({ meta_page_id: pageId, whatsapp_phone_number_id: phoneId }),
+      });
+      setIntegrations(s.settings.integrations);
+      setMsg("Routing ids saved.");
+      load();
+    } catch (e) {
+      setError(clean(e, "Could not save the ids."));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const retry = async (id) => {
+    setMsg("");
+    setError("");
+    try {
+      const r = await api(`/api/integrations/events/${id}/retry`, { method: "POST" });
+      setMsg(`Retry recorded: ${r.event.status}.`);
+      load();
+    } catch (e) {
+      setError(clean(e, "Retry failed."));
+    }
+  };
+
+  const chip = (ok, label) => (
+    <span
+      className={`rounded-full px-2 py-0.5 text-[11px] ${
+        ok ? "bg-emerald-900 text-emerald-300" : "bg-slate-800 text-slate-400"
+      }`}
+    >
+      {label}
+    </span>
+  );
+
+  const statusColor = (status) =>
+    ({
+      processed: "text-emerald-300",
+      received: "text-slate-300",
+      ignored: "text-slate-400",
+      unrouted: "text-amber-300",
+      pending_credentials: "text-amber-300",
+      error: "text-rose-300",
+    }[status] || "text-slate-400");
+
+  if (!integrations && !error) {
+    return (
+      <div className="rounded-xl border border-slate-800 bg-slate-900 p-6">
+        <h3 className="font-semibold">Integrations</h3>
+        <p className="mt-1 text-xs text-slate-500">Loading webhook status…</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border border-slate-800 bg-slate-900 p-6 space-y-4">
+      <h3 className="font-semibold">Integrations — inbound capture</h3>
+      <p className="text-xs text-slate-500">
+        Meta Lead Ads and WhatsApp inbound. Inbound only: the platform records what the contact sent and never
+        auto-replies. Webhooks answer 503 until the server App Secret is configured.
+      </p>
+
+      {integrations && (
+        <>
+          <div className="flex flex-wrap gap-2">
+            {chip(integrations.meta_app_secret_configured, "App secret")}
+            {chip(integrations.meta_verify_token_configured, "Verify token")}
+            {chip(integrations.meta_page_access_token_configured, "Page token")}
+            {chip(integrations.meta_ready, integrations.meta_ready ? "Meta Lead Ads ready" : "Meta Lead Ads not ready")}
+            {chip(
+              integrations.whatsapp_ready,
+              integrations.whatsapp_ready ? "WhatsApp inbound ready" : "WhatsApp inbound not ready"
+            )}
+          </div>
+
+          <div className="space-y-1 text-[11px] text-slate-500">
+            <p>
+              Meta webhook URL: <code className="select-all text-slate-300">{apiBaseUrl()}{integrations.meta_webhook_url}</code>
+            </p>
+            <p>
+              WhatsApp webhook URL:{" "}
+              <code className="select-all text-slate-300">{apiBaseUrl()}{integrations.whatsapp_webhook_url}</code>
+            </p>
+            <p>{integrations.credentials_note}</p>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className="text-xs text-slate-400">
+              Meta Page ID (Lead Ads)
+              <input
+                className="mt-1 block w-full rounded bg-slate-800 px-2 py-1 text-sm text-slate-100"
+                placeholder="numeric page id"
+                value={pageId}
+                onChange={(e) => setPageId(e.target.value)}
+              />
+            </label>
+            <label className="text-xs text-slate-400">
+              WhatsApp phone number ID (Cloud API)
+              <input
+                className="mt-1 block w-full rounded bg-slate-800 px-2 py-1 text-sm text-slate-100"
+                placeholder="numeric phone number id"
+                value={phoneId}
+                onChange={(e) => setPhoneId(e.target.value)}
+              />
+            </label>
+          </div>
+          <p className="text-[11px] text-slate-500">
+            These ids route deliveries to this workspace. An id that belongs to no workspace is stored as “unrouted”
+            — never assigned to someone else. Server credentials stay in environment variables and are never shown
+            here.
+          </p>
+          <button
+            className="rounded bg-slate-800 px-3 py-1.5 text-sm hover:bg-slate-700 disabled:opacity-50"
+            onClick={save}
+            disabled={busy}
+          >
+            Save integration ids
+          </button>
+          {msg && <p className="text-xs text-emerald-400">{msg}</p>}
+          {error && <p className="text-xs text-rose-400">{error}</p>}
+          <ul className="list-disc list-inside text-[11px] text-slate-500 space-y-0.5">
+            {(integrations.notes || []).map((n) => (
+              <li key={n}>{n}</li>
+            ))}
+          </ul>
+        </>
+      )}
+
+      <div className="space-y-2">
+        <p className="text-xs font-semibold text-slate-300">Recent webhook deliveries</p>
+        {denied ? (
+          <p className="text-xs text-slate-500">
+            Event log is owner/admin only — deliveries can contain contact details.
+          </p>
+        ) : events.length === 0 ? (
+          <p className="text-xs text-slate-500">No deliveries recorded yet.</p>
+        ) : (
+          <table className="w-full text-[11px]">
+            <thead className="text-slate-500">
+              <tr>
+                <th className="text-left font-normal pb-1">Received</th>
+                <th className="text-left font-normal pb-1 pl-2">Source</th>
+                <th className="text-left font-normal pb-1 pl-2">Status</th>
+                <th className="text-left font-normal pb-1 pl-2">Lead</th>
+                <th className="text-left font-normal pb-1 pl-2">Detail</th>
+                <th className="pb-1" />
+              </tr>
+            </thead>
+            <tbody>
+              {events.map((e) => (
+                <tr key={e.id} className="border-t border-slate-800">
+                  <td className="py-1 text-slate-400">
+                    {e.received_at ? new Date(e.received_at).toLocaleString() : ""}
+                  </td>
+                  <td className="py-1 pl-2 text-slate-400">{e.source}</td>
+                  <td className={`py-1 pl-2 ${statusColor(e.status)}`}>{e.status}</td>
+                  <td className="py-1 pl-2 text-slate-400">{e.lead_id ?? "—"}</td>
+                  <td className="py-1 pl-2 text-slate-500">{e.error || "—"}</td>
+                  <td className="py-1 text-right">
+                    {retryable.includes(e.status) && (
+                      <button className="text-sky-300 hover:text-sky-200" onClick={() => retry(e.id)}>
+                        Retry
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function SettingsPanel({ user, onLogout }) {
   const [settings, setSettings] = useState({ niche: "", target_area: "", brand_voice: "", landing_slug: null, show_property_fields: false, business_type: "", brand_name: "", logo_url: "", primary_color: "", support_email: "", footer_text: "", hide_platform_brand: false });
   const [slugInput, setSlugInput] = useState("");
@@ -1331,6 +1550,7 @@ function SettingsPanel({ user, onLogout }) {
           cannot change business settings.
         </p>
       </div>
+      <IntegrationsCard />
       <TeamCard />
       <BillingCard />
       <IcpEditor />

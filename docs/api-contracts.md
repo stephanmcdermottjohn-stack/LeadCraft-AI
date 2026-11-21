@@ -14,15 +14,28 @@ Response 200:
   "environment": "development",
   "integrations": {
     "anthropic_configured": false,
-    "whatsapp_configured": false
+    "whatsapp_configured": false,
+    "meta_webhook_configured": false,
+    "meta_leadgen_configured": false
   }
 }
 ```
 
+## Live (P4 — integrations & real-time capture)
+Zero external cost and disabled by default: webhook endpoints answer **503** until the server App Secret / verify token exist. Inbound only — no auto-reply, no outbound send.
+
+- `GET /api/webhooks/meta` — Meta subscription handshake. 503 without `META_VERIFY_TOKEN`; 403 on token mismatch; else echoes `hub.challenge`.
+- `POST /api/webhooks/meta` — Meta Lead Ads delivery. Requires a valid `X-Hub-Signature-256` (HMAC-SHA256 of the raw body with `META_APP_SECRET`); missing/invalid → 403, secret unset → 503. Parses `entry[].changes[]` where `field="leadgen"`, stores one `webhook_events` row per `leadgen_id` (unique key → retries are duplicates), routes by `clients_settings.meta_page_id`. Without `META_PAGE_ACCESS_TOKEN` the delivery stays `pending_credentials` (retry later); with it, Graph API `field_data` is mapped onto a lead: `source="meta_lead_ad"`, server-side `consent_timestamp`, `utm_source="meta"`, full answers in `metadata.answers`. Unknown page id → `unrouted`, `user_id=NULL` (no guessed tenant).
+- `GET /api/webhooks/whatsapp` — same handshake contract.
+- `POST /api/webhooks/whatsapp` — WhatsApp Cloud API delivery, same signature rules. Routes by `clients_settings.whatsapp_phone_number_id`; each inbound message is idempotent by WhatsApp message id. Text/button/interactive bodies are stored; media is labelled and never downloaded. Unknown sender creates one `source="whatsapp_inbound"` lead + conversation + inbound message; known sender reuses them. Status callbacks are acknowledged and ignored.
+- `GET /api/settings` — now also returns `integrations: {meta_page_id, whatsapp_phone_number_id, meta_webhook_url, whatsapp_webhook_url, meta_verify_token_configured, meta_app_secret_configured, meta_page_access_token_configured, whatsapp_access_token_configured, meta_ready, whatsapp_ready, credentials_note, notes[]}`. Booleans only — secrets never reach the browser.
+- `PATCH /api/settings` — accepts `meta_page_id` / `whatsapp_phone_number_id` (numeric, 5–64 digits; `""` clears). Owner/admin/manager only (existing role gate).
+- `GET /api/integrations/events?source=&status=&limit=` — auth, **owner/admin** (payloads contain contact details; agent/viewer → 403). Workspace-scoped; `include_unrouted=true` is platform-admin only and reveals `user_id=NULL` rows.
+- `GET /api/integrations/events/{id}` — owner/admin, tenant-404; includes the stored `payload`.
+- `POST /api/integrations/events/{id}/retry` — owner/admin, tenant-404. Retryable statuses: `unrouted`, `pending_credentials`, `error`, `received`; `processed`/`ignored` → 400. Re-runs routing and (for leadgen) the Graph fetch, never duplicating a lead because the event key is unique.
+
 ## Planned (defined now, implemented in later phases — do not call yet)
-- `POST /api/webhooks/meta/leadgen` — Meta Lead Ads webhook; stores lead with `source=meta_lead_ad` + consent timestamp (Phase 3). Verify-token handshake per Meta docs before any real webhook goes live.
 - `POST /api/leads/match` — area → registered dealers matching (Phase 3)
-- `POST /api/webhooks/whatsapp` — WhatsApp Cloud API inbound; bot replies ONLY to opted-in/inbound contacts (Phase 4)
 
 ## Live (Phase 3 — landing page lead capture)
 - `POST /api/leads/capture` — the ONLY public lead-write endpoint. Requires `slug` (business landing page), `name`, `consent: true`, and at least one of phone/email. `consent_timestamp` is recorded SERVER-SIDE. Honeypot `company` field silently rejects bots (400). `source` is fixed to `landing_page`. Optional property fields (only when the business enables `show_property_fields`): `deal_type` (buy/rent/sell), `property_type`, `budget` — stored in `metadata_json`. 201 → `{lead: {id, status}}`.

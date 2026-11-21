@@ -78,6 +78,16 @@ currency-grouped totals, plan label — no gateway, no enforcement). Agency
 multi-workspace remains design-only until approved (requires a `workspace_id`
 migration across all data tables).
 
+### P4 — Integrations & real-time capture
+Plan: `docs/p4-plan.md`. Shipped: **webhook core** (`webhook_events`
+append-only log, HMAC-SHA256 signature verification, idempotent event keys,
+store-first routing, owner/admin event log + retry), **Meta Lead Ads** (verify
+handshake, server-side consent timestamp, Graph API answer mapping,
+`source=meta_lead_ad`), and **WhatsApp Cloud API inbound** (text/button/media
+label, lead + conversation + inbound message, no auto-reply). Unconfigured
+webhooks answer 503; unknown page/phone ids stay `unrouted` with no tenant.
+Activation needs the owner's Meta app credentials; no paid provider is used.
+
 ---
 
 ## 4. Architecture Impact
