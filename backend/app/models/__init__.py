@@ -585,3 +585,31 @@ class Appointment(Base):
     )
 
     lead: Mapped[Lead] = relationship()
+
+
+class AuditLog(Base):
+    """Append-only workspace audit log of administrative actions (P5 #2).
+
+    Scope is deliberately narrow: workspace-level configuration, permissions,
+    financial ledger entries, data export and retention purges. Lead-level
+    edits already have their own append-only trail (`lead_stage_history`,
+    `lead_activities`), so they are not duplicated here.
+
+    Rows are never updated or deleted by the API. `detail_json` must never hold
+    secrets or passwords - callers pass keys/counts only.
+    """
+
+    __tablename__ = "audit_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # Workspace owner id (tenant scope).
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    # The account that actually performed the action (may be a team member).
+    actor_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    actor_email: Mapped[str] = mapped_column(String(320), default="")
+    # e.g. settings.updated, team.invited, billing.plan_changed
+    action: Mapped[str] = mapped_column(String(60), index=True)
+    target_type: Mapped[str] = mapped_column(String(40), default="")
+    target_id: Mapped[str] = mapped_column(String(60), default="")
+    detail_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

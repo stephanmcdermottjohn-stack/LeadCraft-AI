@@ -1553,6 +1553,7 @@ function SettingsPanel({ user, onLogout }) {
       <IntegrationsCard />
       <TeamCard />
       <BillingCard />
+      <OpsCard />
       <IcpEditor />
       <AbEditor />
       <NurtureEditor />
@@ -2946,6 +2947,277 @@ function InboxPanel() {
 }
 
 const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+// P5 #2: owner/admin data portability, workspace audit log, telemetry retention
+// and honest usage counts. No external metering provider is involved.
+const OPS_COUNT_LABELS = [
+  ["leads", "Leads"],
+  ["appointments", "Appointments"],
+  ["content_posts", "Content posts"],
+  ["lead_notes", "Lead notes"],
+  ["conversations", "Conversations"],
+  ["messages", "Messages"],
+  ["review_requests", "Review asks"],
+  ["webhook_events", "Webhook deliveries"],
+  ["landing_events", "A/B impressions"],
+  ["analytics_events", "Analytics events"],
+  ["team_members_active", "Active team members"],
+];
+
+function OpsCard() {
+  const [usage, setUsage] = useState(null);
+  const [logs, setLogs] = useState([]);
+  const [actions, setActions] = useState([]);
+  const [preview, setPreview] = useState(null);
+  const [days, setDays] = useState(90);
+  const [error, setError] = useState("");
+  const [note, setNote] = useState("");
+  const [denied, setDenied] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const clean = (e, fallback) =>
+    e instanceof Error ? e.message.replace(/^API \d+: /, "") : fallback;
+
+  const load = async () => {
+    setError("");
+    try {
+      const [u, a] = await Promise.all([api("/api/ops/usage"), api("/api/ops/audit?limit=50")]);
+      setUsage(u);
+      setLogs(a.entries || []);
+      setActions(a.actions || []);
+      setDenied(false);
+    } catch (e) {
+      if (e && e.status === 403) {
+        setDenied(true);
+        return;
+      }
+      setError(clean(e, "Ops data load failed."));
+    }
+  };
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  const runPreview = async () => {
+    setError("");
+    setNote("");
+    try {
+      const p = await api(`/api/ops/retention/preview?days=${Number(days)}`);
+      setPreview(p);
+    } catch (e) {
+      setError(clean(e, "Retention preview failed."));
+    }
+  };
+
+  const downloadExport = async () => {
+    setBusy(true);
+    setError("");
+    setNote("");
+    try {
+      const res = await fetch(`${apiBaseUrl()}/api/ops/export`, {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      if (!res.ok) {
+        let detail = await res.text();
+        try {
+          const parsed = JSON.parse(detail);
+          detail = typeof parsed.detail === "string" ? parsed.detail : detail;
+        } catch {
+          /* keep raw */
+        }
+        throw new Error(`API ${res.status}: ${detail}`);
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `leadcraft-workspace-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setNote("Workspace export downloaded (JSON).");
+      load();
+    } catch (e) {
+      setError(clean(e, "Export failed."));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const purgeTelemetry = async () => {
+    if (
+      !window.confirm(
+        `Delete anonymous telemetry older than ${days} days? Leads, notes, appointments and the audit log are never touched. This cannot be undone.`
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    setError("");
+    setNote("");
+    try {
+      const b = await api("/api/ops/retention/purge", {
+        method: "POST",
+        body: JSON.stringify({ days: Number(days), confirm: true }),
+      });
+      setNote(`${b.total_deleted} telemetry row(s) deleted. Business records were not touched.`);
+      await runPreview();
+      load();
+    } catch (e) {
+      setError(clean(e, "Retention purge failed."));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const fmt = (iso) => {
+    if (!iso) return "—";
+    try {
+      return new Date(iso).toLocaleString();
+    } catch {
+      return iso;
+    }
+  };
+
+  if (denied) {
+    return (
+      <div className="rounded-xl border border-slate-800 bg-slate-900 p-6 space-y-2">
+        <h3 className="font-semibold">Data, audit &amp; ops</h3>
+        <p className="text-xs text-amber-400">
+          Owner or admin role required. Exports contain customer contact data and the audit log contains team actions.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border border-slate-800 bg-slate-900 p-6 space-y-5">
+      <div>
+        <h3 className="font-semibold">Data, audit &amp; ops</h3>
+        <p className="text-xs text-slate-500">
+          Export your workspace, review admin actions, and remove anonymous telemetry. Counts are database rows for this
+          workspace only — not storage bytes.
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            className="rounded bg-sky-700 px-3 py-1.5 text-sm hover:bg-sky-600 disabled:opacity-50"
+            onClick={downloadExport}
+            disabled={busy}
+          >
+            {busy ? "Working…" : "Download workspace JSON"}
+          </button>
+          <span className="text-[11px] text-slate-500">
+            Includes leads, notes, timeline, appointments, settings, billing and team members. Excludes anonymous
+            telemetry and secrets.
+          </span>
+        </div>
+      </div>
+
+      {usage && (
+        <div className="space-y-2">
+          <p className="text-xs font-semibold text-slate-300">Usage</p>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+            {OPS_COUNT_LABELS.map(([key, label]) => (
+              <div key={key} className="rounded bg-slate-950 px-2 py-1.5">
+                <span className="block text-slate-500">{label}</span>
+                <span className="text-slate-200">{usage.counts[key] ?? 0}</span>
+              </div>
+            ))}
+          </div>
+          <p className="text-[11px] text-slate-500">
+            Last lead: {fmt(usage.last.lead_at)} · Last appointment: {fmt(usage.last.appointment_at)} · Last webhook:{" "}
+            {fmt(usage.last.webhook_at)}
+          </p>
+        </div>
+      )}
+
+      <div className="space-y-2">
+        <p className="text-xs font-semibold text-slate-300">Telemetry retention</p>
+        <div className="flex flex-wrap items-end gap-2 text-xs">
+          <label className="text-slate-400">
+            Older than (days, 30–3650)
+            <input
+              type="number"
+              min={30}
+              max={3650}
+              className="mt-1 block w-28 rounded bg-slate-800 px-2 py-1"
+              value={days}
+              onChange={(e) => setDays(e.target.value)}
+            />
+          </label>
+          <button
+            type="button"
+            className="rounded bg-slate-800 px-3 py-1.5 text-sm hover:bg-slate-700"
+            onClick={runPreview}
+          >
+            Preview
+          </button>
+          <button
+            type="button"
+            className="rounded bg-rose-900 px-3 py-1.5 text-sm hover:bg-rose-800 disabled:opacity-50"
+            onClick={purgeTelemetry}
+            disabled={busy}
+          >
+            Delete telemetry
+          </button>
+        </div>
+        {preview && (
+          <div className="text-[11px] text-slate-400 space-y-1">
+            <p>
+              Would remove: {preview.counts.landing_events} A/B impressions, {preview.counts.analytics_events} analytics
+              events, {preview.counts.webhook_events} processed webhook deliveries (total {preview.total}).
+            </p>
+            <p className="text-slate-500">Kept: {preview.kept.join(", ")}.</p>
+            <p className="text-slate-500">{preview.notes.join(" ")}</p>
+          </div>
+        )}
+      </div>
+
+      <div className="space-y-2">
+        <p className="text-xs font-semibold text-slate-300">Audit log (workspace actions)</p>
+        {logs.length === 0 ? (
+          <p className="text-xs text-slate-500">No admin actions recorded yet.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead className="text-slate-500">
+                <tr>
+                  <th className="text-left font-normal pb-1">When</th>
+                  <th className="text-left font-normal pb-1 pl-2">Actor</th>
+                  <th className="text-left font-normal pb-1 pl-2">Action</th>
+                  <th className="text-left font-normal pb-1 pl-2">Target</th>
+                </tr>
+              </thead>
+              <tbody>
+                {logs.map((row) => (
+                  <tr key={row.id} className="border-t border-slate-800 align-top">
+                    <td className="py-1.5 text-slate-400 whitespace-nowrap">{fmt(row.created_at)}</td>
+                    <td className="py-1.5 pl-2 text-slate-300">{row.actor_email || "—"}</td>
+                    <td className="py-1.5 pl-2 text-slate-200">{row.action}</td>
+                    <td className="py-1.5 pl-2 text-slate-500">
+                      {row.target_type || "—"}
+                      {row.target_id ? ` #${row.target_id}` : ""}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <p className="text-[11px] text-slate-500">
+          Append-only. Lead edits live in each lead's timeline, not here. Actions: {actions.join(", ") || "none yet"}.
+        </p>
+      </div>
+
+      {note && <p className="text-xs text-emerald-400">{note}</p>}
+      {error && <p className="text-xs text-rose-400">{error}</p>}
+    </div>
+  );
+}
 
 function AppointmentsPanel() {
   const [availability, setAvailability] = useState(null);

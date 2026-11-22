@@ -12,6 +12,7 @@ from app.config import get_settings
 from app.db import get_db
 from app.models import ClientSettings, User
 from app.services import business_types
+from app.services import audit as audit_svc
 from app.services import scoring as scoring_service
 
 router = APIRouter(prefix="/api/settings")
@@ -217,5 +218,7 @@ def update_settings(body: SettingsBody, user: User = Depends(get_current_user), 
             )
         row.whatsapp_phone_number_id = value
 
+    changed = sorted(k for k, v in body.model_dump(exclude_unset=True).items() if v is not None)
+    audit_svc.record(db, user, "settings.updated", "settings", row.id, {"keys": changed})
     db.commit()
     return {"settings": _public(row)}

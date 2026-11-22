@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.api.auth import get_current_user
 from app.db import get_db
 from app.models import Appointment, ClientSettings, User
+from app.services import audit as audit_svc
 from app.services import booking as svc
 
 router = APIRouter(prefix="/api/appointments")
@@ -99,6 +100,14 @@ def update_availability(
         svc.update_availability(row, payload)
     except svc.BookingError as exc:
         raise HTTPException(status_code=exc.status, detail=str(exc))
+    audit_svc.record(
+        db,
+        user,
+        "booking.availability_updated",
+        "settings",
+        row.id,
+        {"keys": sorted(payload.keys())},
+    )
     db.commit()
     return {"availability": svc.availability_public(row), "can_edit": True}
 

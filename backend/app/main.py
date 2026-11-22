@@ -21,6 +21,7 @@ from app.api.integrations import router as integrations_router
 from app.api.landing_ab import router as landing_ab_router
 from app.api.leads import router as leads_router
 from app.api.nurture import router as nurture_router
+from app.api.ops import router as ops_router
 from app.api.public import router as public_router
 from app.api.qualification import router as qualification_router
 from app.api.referrals import router as referrals_router
@@ -112,6 +113,7 @@ def create_app() -> FastAPI:
     app.include_router(analytics_router)
     app.include_router(attribution_router)
     app.include_router(nurture_router)
+    app.include_router(ops_router)
     app.include_router(inbox_router)
     app.include_router(reports_router)
     app.include_router(reviews_router)

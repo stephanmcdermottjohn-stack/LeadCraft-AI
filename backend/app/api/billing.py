@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.api.auth import get_current_user
 from app.db import get_db
 from app.models import BillingEntry, User
+from app.services import audit as audit_svc
 from app.services import billing as svc
 
 router = APIRouter(prefix="/api/billing")
@@ -78,6 +79,14 @@ def create_entry(
         )
     except svc.BillingError as exc:
         raise HTTPException(status_code=exc.status, detail=str(exc))
+    audit_svc.record(
+        db,
+        user,
+        "billing.entry_added",
+        "billing_entry",
+        row.id,
+        {"amount": row.amount, "currency": row.currency},
+    )
     db.commit()
     return {"entry": _public(row)}
 
@@ -92,7 +101,11 @@ def set_plan(
         raise HTTPException(
             status_code=400, detail=f"plan_tier must be one of: {', '.join(svc.PLAN_TIERS)}"
         )
+    old_tier = user.plan_tier
     user.plan_tier = tier
+    audit_svc.record(
+        db, user, "billing.plan_changed", "workspace", user.id, {"from": old_tier, "to": tier}
+    )
     db.commit()
     return {
         "plan_tier": tier,
@@ -108,5 +121,13 @@ def delete_entry(
     row = db.get(BillingEntry, entry_id)
     if row is None or row.user_id != user.id:
         raise HTTPException(status_code=404, detail="Billing entry not found.")
+    audit_svc.record(
+        db,
+        user,
+        "billing.entry_deleted",
+        "billing_entry",
+        row.id,
+        {"amount": row.amount, "currency": row.currency},
+    )
     db.delete(row)
     db.commit()

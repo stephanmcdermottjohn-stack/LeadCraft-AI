@@ -196,6 +196,16 @@ Zero external cost. **The platform sends no SMS, email or WhatsApp confirmation/
 - `GET /api/public/landing/{slug}` now also returns `booking` (public availability subset — no owner data).
 - Frontend: **Appointments** nav — availability editor, appointment table with status/reminder actions, manual add form; landing page offers a booking mode when enabled (date → slots → details/consent → confirmation).
 
+## Live (P5 #2 — data, audit & ops v1)
+Owner/admin only (agent/viewer → 403, unauth → 401). Zero external cost, no metering provider. Full scope: `docs/p5-ops-plan.md`.
+
+- `GET /api/ops/export` — JSON attachment of the workspace's own data (profile, settings without secrets, leads, notes, stage history, activities, qualifications, scores, appointments, content, conversations/messages, reviews, campaign spend, nurture, billing ledger, team members without invite tokens, routed webhook deliveries). Capped at 5,000 rows per table (`truncated_tables`); anonymous telemetry and `password_hash` are excluded and stated in the payload. Logged as `ops.export`.
+- `GET /api/ops/audit?action=&limit=1..500` — newest-first workspace audit entries (`actor_email`, `action`, `target_type`, `target_id`, safe `detail`), distinct `actions[]`, `append_only: true`. Recorded actions: `settings.updated` (keys only), `team.invited|joined|role_changed|removed`, `billing.entry_added|entry_deleted|plan_changed`, `booking.availability_updated`, `ops.export`, `ops.retention_purged`. Lead edits stay in the lead timeline.
+- `GET /api/ops/retention/preview?days=30..3650` — counts of `landing_events`, `analytics_events`, and `processed|ignored` `webhook_events` older than the cutoff, plus what is kept.
+- `POST /api/ops/retention/purge` — `{days (30–3650), confirm}`; `confirm` false → 400. Deletes only those telemetry rows; leads/consent/notes/appointments/audit log are never touched. Writes an audit row with deleted counts.
+- `GET /api/ops/usage` — workspace row counts (leads, appointments, content, notes, conversations/messages, reviews, webhooks, telemetry, active team members) and last-activity timestamps. Explicitly rows, not storage bytes.
+- Frontend: Settings → "Data, audit & ops" card (download JSON, usage grid, retention preview/purge, audit table, role notice for non-owner/admin).
+
 ## Ground rules encoded in contracts (Section 0 of the roadmap)
 - Every lead write requires a `source` from the allowlist and a `consent_timestamp`.
 - No endpoint creates outbound-first contact. `messages.direction=in` rows must exist before the bot replies.

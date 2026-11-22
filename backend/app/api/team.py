@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.api.auth import get_current_user
 from app.db import get_db
 from app.models import User, WorkspaceMember
+from app.services import audit as audit_svc
 from app.services import team as svc
 
 router = APIRouter(prefix="/api/team")
@@ -91,6 +92,9 @@ def invite(
         row = svc.invite(db, user, body.email, body.role)
     except svc.TeamError as exc:
         raise HTTPException(status_code=exc.status, detail=str(exc))
+    audit_svc.record(
+        db, user, "team.invited", "member", row.id, {"email": row.invited_email, "role": row.role}
+    )
     db.commit()
     return {"member": _public(row, True)}
 
@@ -106,6 +110,17 @@ def accept(
         row = svc.accept(db, account, body.token)
     except svc.TeamError as exc:
         raise HTTPException(status_code=exc.status, detail=str(exc))
+    # Recorded in the joined workspace, attributed to the invitee (not the owner).
+    audit_svc.record_for(
+        db,
+        workspace_id=row.owner_user_id,
+        actor_user_id=account.id,
+        actor_email_value=account.email,
+        action="team.joined",
+        target_type="member",
+        target_id=row.id,
+        detail={"role": row.role},
+    )
     db.commit()
     return {
         "member": _public(row, False),
@@ -124,10 +139,19 @@ def update_role(
     row = db.get(WorkspaceMember, member_id)
     if row is None or row.owner_user_id != user.id:
         raise HTTPException(status_code=404, detail="Team member not found.")
+    old_role = row.role
     try:
         svc.change_role(db, row, _account_id(user), body.role)
     except svc.TeamError as exc:
         raise HTTPException(status_code=exc.status, detail=str(exc))
+    audit_svc.record(
+        db,
+        user,
+        "team.role_changed",
+        "member",
+        row.id,
+        {"email": row.invited_email, "from": old_role, "to": row.role},
+    )
     db.commit()
     return {"member": _public(row, True)}
 
@@ -140,8 +164,17 @@ def remove_member(
     row = db.get(WorkspaceMember, member_id)
     if row is None or row.owner_user_id != user.id:
         raise HTTPException(status_code=404, detail="Team member not found.")
+    old_role = row.role
     try:
         svc.remove(db, row, _account_id(user))
     except svc.TeamError as exc:
         raise HTTPException(status_code=exc.status, detail=str(exc))
+    audit_svc.record(
+        db,
+        user,
+        "team.removed",
+        "member",
+        row.id,
+        {"email": row.invited_email, "role": old_role},
+    )
     db.commit()

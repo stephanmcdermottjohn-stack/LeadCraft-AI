@@ -100,6 +100,15 @@ reminder — `reminded_at` only records that the owner contacted the customer.
 Availability changes are owner/admin/manager; agents manage appointments;
 viewers are read-only.
 
+### P5 #2 — Data, audit & ops
+Plan: `docs/p5-ops-plan.md`. Shipped: **workspace JSON export** (own data
+only, 5,000 rows/table cap, no telemetry, no secrets, no invite tokens),
+**append-only workspace audit log** (settings keys, team permissions, billing
+ledger, booking config, export/purge — attributed to the real actor),
+**telemetry retention** (manual preview + purge of old anonymous analytics and
+processed webhook deliveries; business records never purged), and honest
+**usage counts** (rows, not bytes). Owner/admin only; zero external cost.
+
 ---
 
 ## 4. Architecture Impact
