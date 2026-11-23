@@ -214,7 +214,13 @@ def revenue_report(db: Session, user_id: int, days: int, now: datetime.datetime 
         data = bucket(currency)
         spend = float(spend_by_currency.get(currency, 0.0) or 0)
         revenue = float(data["revenue"])
-        roi = round((revenue - spend) / spend * 100, 1) if spend > 0 else None
+        # ROI needs both spend and at least one confirmed won deal: zero won
+        # deals means revenue is unknown, not literally zero, so no ROI number.
+        roi = (
+            round((revenue - spend) / spend * 100, 1)
+            if spend > 0 and data["won_deals"]
+            else None
+        )
         cost_per_won = round(spend / data["won_deals"], 2) if spend > 0 and data["won_deals"] else None
         totals.append(
             {
@@ -262,7 +268,9 @@ def revenue_report(db: Session, user_id: int, days: int, now: datetime.datetime 
                 "won_deals": data["won_deals"],
                 "revenue": _money(revenue),
                 "spend": _money(spend),
-                "roi_pct": round((revenue - spend) / spend * 100, 1) if spend > 0 else None,
+                "roi_pct": round((revenue - spend) / spend * 100, 1)
+                if spend > 0 and data["won_deals"]
+                else None,
                 "cost_per_won": round(spend / data["won_deals"], 2)
                 if spend > 0 and data["won_deals"]
                 else None,
@@ -277,7 +285,7 @@ def revenue_report(db: Session, user_id: int, days: int, now: datetime.datetime 
         "Revenue is only what you recorded on won deals - a lead with no outcome is unknown, never zero.",
         "Totals are grouped per currency; the platform never converts currencies.",
         f"Revenue counts deals closed in the last {days} days. Campaign spend is all-time owner-entered data (no spend dates), so ROI mixes windows.",
-        "ROI and cost-per-won are null until spend exists in the same currency; they are not forecasts.",
+        "ROI and cost-per-won are null until spend exists in the same currency and at least one won deal is recorded; they are not forecasts.",
     ]
     if win_rate is None:
         notes.append(

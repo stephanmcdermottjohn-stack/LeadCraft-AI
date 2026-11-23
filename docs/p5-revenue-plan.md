@@ -61,7 +61,8 @@ Rules the report enforces:
    ledger which has **no dates**, so ROI mixes an all-time spend total with
    windowed revenue — stated in `notes`.
 3. **ROI is null, not 0%.** `roi_pct` and `cost_per_won` are `null` until
-   spend exists in the **same currency**.
+   spend exists in the **same currency** *and* at least one won deal is
+   recorded. Spend with zero won deals means revenue is unknown, not `-100%`.
 4. **Win rate gate.** `win_rate_pct` stays `null` below **10 closed deals** in
    the window (`rates_known: false`). No tiny-sample percentages.
 5. **Open deals** carry amount + currency as pipeline value but never count as

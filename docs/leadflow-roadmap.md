@@ -114,8 +114,8 @@ Plan: `docs/p5-revenue-plan.md`. Shipped: **one row per lead**
 (`deal_outcomes`: `open|won|lost`, amount, currency, `closed_at`, note),
 manual owner/team entry only — revenue is never inferred or auto-filled.
 Roles: owner/admin/manager; writes append to the lead timeline. Reports show
-**per-currency totals** (no conversion), **ROI and cost-per-won as `null`
-until spend exists in the same currency**, **win rate `null` below 10 closed
+**per-currency totals** (no conversion), **ROI and cost-per-won as `null` until spend exists in the same currency and a
+won deal is recorded**, **win rate `null` below 10 closed
 deals**, open pipeline and lost value kept separate, and coverage (leads with
 an outcome / total). Campaign spend is the existing all-time ledger, labelled
 as mixing windows. Included in the ops export/usage. Zero external cost.

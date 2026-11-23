@@ -232,6 +232,16 @@ def test_report_totals_per_currency_and_honest_null_roi(client):
         headers=owner,
     )
     assert spend.status_code in (200, 201), spend.text
+    # Spend with no recorded won deal must NOT become a -100% ROI: revenue is
+    # unknown, so the ROI stays null for that currency.
+    assert (
+        client.put(
+            "/api/campaign-spend",
+            json={"campaign": "offline", "spend": 1000, "currency": "AED"},
+            headers=owner,
+        ).status_code
+        in (200, 201)
+    )
 
     report = client.get("/api/reports/revenue?days=30", headers=owner).json()
     by_currency = {row["currency"]: row for row in report["totals_by_currency"]}
@@ -239,6 +249,10 @@ def test_report_totals_per_currency_and_honest_null_roi(client):
     assert by_currency["PKR"]["roi_pct"] == 100.0  # (100000-50000)/50000
     assert by_currency["PKR"]["cost_per_won"] == 50000.0
     assert by_currency["USD"]["roi_pct"] is None
+    assert by_currency["AED"]["spend"] == 1000.0
+    assert by_currency["AED"]["won_deals"] == 0
+    assert by_currency["AED"]["roi_pct"] is None
+    assert by_currency["AED"]["cost_per_won"] is None
 
     campaigns = {(c["campaign"], c["currency"]): c for c in report["campaigns"]}
     assert campaigns[("meta-q4", "PKR")]["won_deals"] == 1
@@ -251,6 +265,9 @@ def test_report_totals_per_currency_and_honest_null_roi(client):
     assert campaigns[("(unattributed)", "USD")]["revenue"] == 500.0
     assert campaigns[("(unattributed)", "USD")]["spend"] == 0.0
     assert campaigns[("(unattributed)", "USD")]["roi_pct"] is None
+    assert campaigns[("offline", "AED")]["won_deals"] == 0
+    assert campaigns[("offline", "AED")]["roi_pct"] is None
+    assert campaigns[("offline", "AED")]["cost_per_won"] is None
     assert any("(unattributed)" in note for note in report["notes"])
 
 
