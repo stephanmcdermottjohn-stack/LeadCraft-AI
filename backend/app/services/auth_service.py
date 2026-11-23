@@ -13,11 +13,11 @@ import base64
 import hashlib
 import hmac
 import json
-import os
 import secrets
 import time
 
 PBKDF2_ITERATIONS = 390_000
+DEV_SECRET = "dev-only-insecure-secret-change-me"
 
 
 def hash_password(password: str) -> str:
@@ -38,7 +38,12 @@ def verify_password(password: str, stored: str) -> bool:
 
 
 def _secret_key() -> str:
-    return os.environ.get("SECRET_KEY", "dev-only-insecure-secret-change-me")
+    # Read through Settings so a SECRET_KEY placed only in backend/.env (not
+    # exported into the process environment) still signs tokens. Falling back
+    # to the known dev default is refused in production by create_app().
+    from app.config import get_settings
+
+    return get_settings().secret_key or DEV_SECRET
 
 
 def _sign(payload_b64: str) -> str:

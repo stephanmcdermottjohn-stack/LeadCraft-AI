@@ -36,6 +36,7 @@ from app.api.webhooks_whatsapp import router as webhooks_whatsapp_router
 from app.api.settings import router as settings_router
 from app.config import get_settings
 from app.models import Base
+from app.services import auth_service
 
 
 async def _due_posts_loop() -> None:
@@ -89,6 +90,18 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     settings = get_settings()
+
+    # Fail closed in production: a known default signing key would let anyone
+    # forge auth tokens. Local dev keeps the harmless default so the skeleton
+    # still runs with zero configuration (see docs/.env.example).
+    if (
+        settings.environment.strip().lower() == "production"
+        and settings.secret_key.strip() in ("", auth_service.DEV_SECRET)
+    ):
+        raise RuntimeError(
+            "SECRET_KEY must be set to a long random value when ENVIRONMENT=production."
+        )
+
     app = FastAPI(title=settings.app_name, version=settings.app_version, lifespan=lifespan)
     app.state.db_engine = db_module.engine
 

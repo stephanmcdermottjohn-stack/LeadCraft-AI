@@ -57,6 +57,18 @@ pytest
 - Deploy: `powershell -ExecutionPolicy Bypass -File scripts_local/vercel_deploy.ps1 -Which backend|frontend` (token in `.vercel-token`, gitignored)
 - Serverless notes: background worker loop is disabled (`APP_DISABLE_SCHEDULER=1`); due scheduled posts flip to `ready_to_publish` lazily on posts read. Cold starts re-run `create_all` (idempotent).
 
+## Security
+
+- Rotation runbook (after any leak): `docs/security-rotation-runbook.md`.
+- Scan tracked files for common secret patterns (never prints values):
+  `powershell -ExecutionPolicy Bypass -File scripts_local/check_secrets.ps1`.
+- `ENVIRONMENT=production` refuses to boot when `SECRET_KEY` is missing or the
+  known dev default; tokens are HMAC-signed with a 7-day TTL.
+- Reset a login password without a dashboard:
+  `backend/scripts/set_password.py --email <account>` (prompted, not echoed).
+- Only `VITE_API_BASE` belongs in the frontend Vercel project; DB/LLM/signing
+  keys live only on the backend project.
+
 ## Notes
 - Secrets: copy `docs/.env.example` → `backend/.env`; never commit real keys.
 - `docs/api-contracts.md` lists current + planned endpoints and the consent rules encoded in them.
