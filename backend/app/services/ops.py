@@ -22,6 +22,7 @@ from app.models import (
     ClientSettings,
     ContentPost,
     Conversation,
+    DealOutcome,
     LandingEvent,
     Lead,
     LeadActivity,
@@ -100,6 +101,7 @@ def workspace_export(db: Session, user: User) -> dict:
         "lead_qualifications": (LeadQualification, ()),
         "lead_score_history": (LeadScoreHistory, ()),
         "appointments": (Appointment, ()),
+        "deal_outcomes": (DealOutcome, ()),
         "content_posts": (ContentPost, ()),
         "conversations": (Conversation, ()),
         "review_requests": (ReviewRequest, ()),
@@ -290,6 +292,7 @@ def usage(db: Session, user: User) -> dict:
     counts = {
         "leads": _count(db, Lead, user.id),
         "appointments": _count(db, Appointment, user.id),
+        "deal_outcomes": _count(db, DealOutcome, user.id),
         "content_posts": _count(db, ContentPost, user.id),
         "lead_notes": _count(db, LeadNote, user.id),
         "lead_stage_history": _count(db, LeadStageHistory, user.id),

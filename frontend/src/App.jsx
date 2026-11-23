@@ -2376,6 +2376,72 @@ function LeadsPanel() {
     }
   };
 
+  // Revenue & ROI (P5 #3): manual deal outcome. Owner/admin/manager only -
+  // agents keep their operational workflow but cannot record money.
+  const meRole = getUser()?.role ?? "owner";
+  const canRevenue = ["owner", "admin", "manager"].includes(meRole);
+  const [openDeal, setOpenDeal] = useState(null);
+  const [deals, setDeals] = useState({});
+  const [dealDraft, setDealDraft] = useState(null);
+  const [dealMsg, setDealMsg] = useState("");
+
+  const toggleDeal = async (id) => {
+    if (openDeal === id) {
+      setOpenDeal(null);
+      return;
+    }
+    setDealMsg("");
+    try {
+      const b = await api(`/api/leads/${id}/outcome`);
+      const o = b.outcome;
+      setDeals((s) => ({ ...s, [id]: o }));
+      setDealDraft({
+        status: o?.status ?? "open",
+        amount: o?.amount ?? "",
+        currency: o?.currency ?? "PKR",
+        closed_at: o?.closed_at ?? "",
+        note: o?.note ?? "",
+      });
+      setOpenDeal(id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message.replace(/^API \d+: /, "") : "Deal load failed.");
+    }
+  };
+
+  const saveDeal = async (id) => {
+    if (!dealDraft) return;
+    setDealMsg("");
+    try {
+      const b = await api(`/api/leads/${id}/outcome`, {
+        method: "PUT",
+        body: JSON.stringify({
+          status: dealDraft.status,
+          amount: Number(dealDraft.amount || 0),
+          currency: dealDraft.currency,
+          closed_at: dealDraft.status === "open" ? null : (dealDraft.closed_at || null),
+          note: dealDraft.note,
+        }),
+      });
+      setDeals((s) => ({ ...s, [id]: b.outcome }));
+      setDealMsg("Deal saved and added to the lead timeline.");
+    } catch (err) {
+      setDealMsg(err instanceof Error ? err.message.replace(/^API \d+: /, "") : "Deal save failed.");
+    }
+  };
+
+  const removeDeal = async (id) => {
+    if (!window.confirm("Remove this deal outcome? Revenue for this lead becomes unknown again.")) return;
+    setDealMsg("");
+    try {
+      await api(`/api/leads/${id}/outcome`, { method: "DELETE" });
+      setDeals((s) => ({ ...s, [id]: null }));
+      setDealDraft({ status: "open", amount: "", currency: "PKR", closed_at: "", note: "" });
+      setDealMsg("Deal outcome removed.");
+    } catch (err) {
+      setDealMsg(err instanceof Error ? err.message.replace(/^API \d+: /, "") : "Remove failed.");
+    }
+  };
+
   const mdLine = (md) => {
     const entries = Object.entries(md ?? {}).filter(([, v]) => String(v).trim());
     if (!entries.length) return "";
@@ -2736,6 +2802,84 @@ function LeadsPanel() {
                     The referred person submits the normal consent form; only link-based referrals are tracked.
                   </p>
                 </div>
+              )}
+              {canRevenue && (
+                <>
+                  <button className="mt-2 ml-3 text-xs text-teal-300 hover:text-teal-200" onClick={() => toggleDeal(l.id)}>
+                    {openDeal === l.id ? "Hide deal" : deals[l.id] ? `Deal: ${deals[l.id].status}` : "Deal"}
+                  </button>
+                  {openDeal === l.id && dealDraft && (
+                    <div className="mt-1 rounded border border-slate-800 bg-slate-900 p-2 text-xs space-y-2">
+                      <div className="flex flex-wrap items-end gap-2">
+                        <label className="text-slate-400">
+                          Status
+                          <select
+                            className="mt-1 block rounded bg-slate-800 px-2 py-1"
+                            value={dealDraft.status}
+                            onChange={(e) => setDealDraft({ ...dealDraft, status: e.target.value })}
+                          >
+                            <option value="open">open</option>
+                            <option value="won">won</option>
+                            <option value="lost">lost</option>
+                          </select>
+                        </label>
+                        <label className="text-slate-400">
+                          Amount
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            className="mt-1 block w-28 rounded bg-slate-800 px-2 py-1"
+                            value={dealDraft.amount}
+                            onChange={(e) => setDealDraft({ ...dealDraft, amount: e.target.value })}
+                          />
+                        </label>
+                        <label className="text-slate-400">
+                          Currency
+                          <input
+                            className="mt-1 block w-20 rounded bg-slate-800 px-2 py-1 uppercase"
+                            maxLength={10}
+                            value={dealDraft.currency}
+                            onChange={(e) => setDealDraft({ ...dealDraft, currency: e.target.value })}
+                          />
+                        </label>
+                        {dealDraft.status !== "open" && (
+                          <label className="text-slate-400">
+                            Closed on
+                            <input
+                              type="date"
+                              className="mt-1 block rounded bg-slate-800 px-2 py-1"
+                              value={dealDraft.closed_at}
+                              onChange={(e) => setDealDraft({ ...dealDraft, closed_at: e.target.value })}
+                            />
+                          </label>
+                        )}
+                      </div>
+                      <input
+                        className="w-full rounded bg-slate-800 px-2 py-1"
+                        maxLength={500}
+                        placeholder="Note (optional)"
+                        value={dealDraft.note}
+                        onChange={(e) => setDealDraft({ ...dealDraft, note: e.target.value })}
+                      />
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button className="rounded bg-teal-800 px-3 py-1 hover:bg-teal-700" onClick={() => saveDeal(l.id)}>
+                          Save deal
+                        </button>
+                        {deals[l.id] && (
+                          <button className="rounded bg-rose-900 px-3 py-1 hover:bg-rose-800" onClick={() => removeDeal(l.id)}>
+                            Remove
+                          </button>
+                        )}
+                      </div>
+                      <p className="text-slate-500">
+                        Manual revenue only. Currencies are never converted; ROI needs campaign spend in the same
+                        currency.
+                      </p>
+                      {dealMsg && <p className="text-slate-400">{dealMsg}</p>}
+                    </div>
+                  )}
+                </>
               )}
               {openTimeline === l.id && (
                 <ul className="mt-1 space-y-1 border-t border-slate-800 pt-2">
@@ -3590,6 +3734,8 @@ function ReportsPanel() {
   const [reviews, setReviews] = useState(null);
   const [referrals, setReferrals] = useState(null);
   const [attr, setAttr] = useState(null);
+  const [revenue, setRevenue] = useState(null);
+  const [revenueDenied, setRevenueDenied] = useState(false);
   const [spendEdits, setSpendEdits] = useState({});
   const [spendMsg, setSpendMsg] = useState("");
   const [days, setDays] = useState(30);
@@ -3603,6 +3749,14 @@ function ReportsPanel() {
       .catch((e) => setError(e.message));
     api("/api/reviews").then((b) => setReviews(b.summary)).catch(() => {});
     api(`/api/referrals/report?days=365`).then(setReferrals).catch(() => {});
+    api(`/api/reports/revenue?days=${days}`)
+      .then((b) => {
+        setRevenue(b);
+        setRevenueDenied(false);
+      })
+      .catch((e) => {
+        if (e && e.status === 403) setRevenueDenied(true);
+      });
     loadAttr();
   }, [days]);
 
@@ -3759,6 +3913,153 @@ function ReportsPanel() {
             </>
           )}
         </div>
+      </div>
+      <div className="rounded-xl border border-slate-800 bg-slate-900 p-6 space-y-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <h3 className="font-semibold">Revenue &amp; ROI</h3>
+          <span className="rounded bg-slate-800 px-2 py-0.5 text-[10px] text-slate-300">
+            manual entries · no currency conversion
+          </span>
+        </div>
+        {revenueDenied ? (
+          <p className="text-xs text-amber-400">Owner, admin or manager role required to see revenue.</p>
+        ) : !revenue ? (
+          <p className="text-xs text-slate-500">No revenue data in this window.</p>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+              <div className="rounded-lg bg-slate-950 border border-slate-800 p-3">
+                <p className="text-slate-500">Won deals</p>
+                <p className="text-lg font-semibold">{revenue.outcomes.won_deals}</p>
+              </div>
+              <div className="rounded-lg bg-slate-950 border border-slate-800 p-3">
+                <p className="text-slate-500">Lost deals</p>
+                <p className="text-lg font-semibold">{revenue.outcomes.lost_deals}</p>
+              </div>
+              <div className="rounded-lg bg-slate-950 border border-slate-800 p-3">
+                <p className="text-slate-500">Open pipeline</p>
+                <p className="text-lg font-semibold">{revenue.outcomes.open_deals}</p>
+              </div>
+              <div className="rounded-lg bg-slate-950 border border-slate-800 p-3">
+                <p className="text-slate-500">Win rate</p>
+                <p className="text-lg font-semibold">{pct(revenue.outcomes.win_rate_pct)}</p>
+              </div>
+            </div>
+            <p className="text-[11px] text-slate-500">
+              Deals with an outcome: {revenue.coverage.leads_with_outcome}/{revenue.coverage.leads_total} (
+              {pct(revenue.coverage.coverage_pct)}). Win rate stays unknown below {revenue.outcomes.rate_gate} closed
+              deals in the window — never guessed.
+            </p>
+            {revenue.totals_by_currency.length === 0 ? (
+              <p className="text-xs text-slate-500">
+                No deal outcomes recorded yet — revenue is unknown, not zero.
+              </p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead className="text-slate-500">
+                    <tr>
+                      <th className="text-left font-normal pb-1">Currency</th>
+                      <th className="text-right font-normal pb-1 pl-2">Revenue</th>
+                      <th className="text-right font-normal pb-1 pl-2">Won</th>
+                      <th className="text-right font-normal pb-1 pl-2">Avg deal</th>
+                      <th className="text-right font-normal pb-1 pl-2">Open value</th>
+                      <th className="text-right font-normal pb-1 pl-2">Lost value</th>
+                      <th className="text-right font-normal pb-1 pl-2">Spend</th>
+                      <th className="text-right font-normal pb-1 pl-2">ROI</th>
+                      <th className="text-right font-normal pb-1 pl-2">Cost / won</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {revenue.totals_by_currency.map((row) => (
+                      <tr key={row.currency} className="border-t border-slate-800">
+                        <td className="py-1.5 text-slate-200">{row.currency}</td>
+                        <td className="py-1.5 pl-2 text-right text-slate-200">
+                          {row.revenue.toLocaleString()} {row.currency}
+                        </td>
+                        <td className="py-1.5 pl-2 text-right text-slate-300">{row.won_deals}</td>
+                        <td className="py-1.5 pl-2 text-right text-slate-400">
+                          {row.avg_deal === null ? "unknown" : `${row.avg_deal.toLocaleString()} ${row.currency}`}
+                        </td>
+                        <td className="py-1.5 pl-2 text-right text-slate-400">
+                          {row.open_value.toLocaleString()} {row.currency}
+                        </td>
+                        <td className="py-1.5 pl-2 text-right text-slate-400">
+                          {row.lost_value.toLocaleString()} {row.currency}
+                        </td>
+                        <td className="py-1.5 pl-2 text-right text-slate-400">
+                          {row.spend.toLocaleString()} {row.currency}
+                        </td>
+                        <td className="py-1.5 pl-2 text-right">
+                          {row.roi_pct === null ? (
+                            <span className="text-slate-500">unknown</span>
+                          ) : (
+                            <span className={row.roi_pct >= 0 ? "text-emerald-400" : "text-rose-400"}>
+                              {row.roi_pct}%
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-1.5 pl-2 text-right text-slate-400">
+                          {row.cost_per_won === null
+                            ? "unknown"
+                            : `${row.cost_per_won.toLocaleString()} ${row.currency}`}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {revenue.campaigns.length > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-slate-300 mb-1">By campaign</p>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead className="text-slate-500">
+                      <tr>
+                        <th className="text-left font-normal pb-1">Campaign</th>
+                        <th className="text-left font-normal pb-1 pl-2">Currency</th>
+                        <th className="text-right font-normal pb-1 pl-2">Won</th>
+                        <th className="text-right font-normal pb-1 pl-2">Revenue</th>
+                        <th className="text-right font-normal pb-1 pl-2">Spend</th>
+                        <th className="text-right font-normal pb-1 pl-2">ROI</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {revenue.campaigns.map((row) => (
+                        <tr key={`${row.campaign}-${row.currency}`} className="border-t border-slate-800">
+                          <td className="py-1.5 text-slate-200">{row.campaign}</td>
+                          <td className="py-1.5 pl-2 text-slate-400">{row.currency}</td>
+                          <td className="py-1.5 pl-2 text-right text-slate-300">{row.won_deals}</td>
+                          <td className="py-1.5 pl-2 text-right text-slate-300">
+                            {row.revenue.toLocaleString()} {row.currency}
+                          </td>
+                          <td className="py-1.5 pl-2 text-right text-slate-400">
+                            {row.spend.toLocaleString()} {row.currency}
+                          </td>
+                          <td className="py-1.5 pl-2 text-right">
+                            {row.roi_pct === null ? (
+                              <span className="text-slate-500">unknown</span>
+                            ) : (
+                              <span className={row.roi_pct >= 0 ? "text-emerald-400" : "text-rose-400"}>
+                                {row.roi_pct}%
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+            <ul className="list-disc list-inside text-[11px] text-slate-500 space-y-0.5">
+              {revenue.notes.map((n) => (
+                <li key={n}>{n}</li>
+              ))}
+            </ul>
+          </>
+        )}
       </div>
       {attr && (
         <div className="rounded-xl border border-slate-800 bg-slate-900 p-6 space-y-4">

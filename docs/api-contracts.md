@@ -206,6 +206,16 @@ Owner/admin only (agent/viewer → 403, unauth → 401). Zero external cost, no 
 - `GET /api/ops/usage` — workspace row counts (leads, appointments, content, notes, conversations/messages, reviews, webhooks, telemetry, active team members) and last-activity timestamps. Explicitly rows, not storage bytes.
 - Frontend: Settings → "Data, audit & ops" card (download JSON, usage grid, retention preview/purge, audit table, role notice for non-owner/admin).
 
+## Live (P5 #3 — revenue & ROI tracking v1)
+Owner/admin/manager only for money (agent/viewer → 403, unauth → 401). Manual entries, zero external cost, no currency conversion. Full scope: `docs/p5-revenue-plan.md`.
+
+- `GET /api/leads/{lead_id}/outcome` — current `DealOutcome` (`open|won|lost`, `amount`, `currency`, `closed_at`, `note`) or `null`, plus `can_edit`. `404` for another workspace's lead.
+- `PUT /api/leads/{lead_id}/outcome` — validate + upsert (one row per lead). `status` allowlist; `amount` finite 0–1e12; `currency` 2–10 letters normalised to uppercase; `closed_at` `YYYY-MM-DD`, forced `null` for `open`, defaults to today, never future. Invalid → `400`. Appends a `deal_outcome` activity to the lead timeline.
+- `DELETE /api/leads/{lead_id}/outcome` — remove the row; revenue becomes unknown again. Appends `deal_outcome_cleared`. `404` if none.
+- `GET /api/reports/revenue?days=1..3650` — `outcomes` (won/lost/closed/open, `win_rate_pct`, `rates_known`, `rate_gate=10`), `coverage` (leads with outcome / total), `totals_by_currency[]` (revenue, avg deal, open/lost value, spend, `roi_pct`, `cost_per_won`), `campaigns[]` (by lead campaign + currency, `(unattributed)` never guessed), and `notes[]` stating the rules. `roi_pct`/`cost_per_won` are `null` until spend exists in the same currency; win rate `null` below 10 closed deals; currencies never mixed/converted; spend is all-time owner-entered while revenue is windowed.
+- Ops: `deal_outcomes` included in `/api/ops/export` and `/api/ops/usage`.
+- Frontend: Leads → per-lead "Deal" toggle (status/amount/currency/close date/note, save/remove, role-gated); Reports → "Revenue & ROI" card with per-currency + by-campaign tables and honest unknown labels.
+
 ## Ground rules encoded in contracts (Section 0 of the roadmap)
 - Every lead write requires a `source` from the allowlist and a `consent_timestamp`.
 - No endpoint creates outbound-first contact. `messages.direction=in` rows must exist before the bot replies.

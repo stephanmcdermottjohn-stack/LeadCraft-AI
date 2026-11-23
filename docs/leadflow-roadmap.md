@@ -109,6 +109,17 @@ ledger, booking config, export/purge — attributed to the real actor),
 processed webhook deliveries; business records never purged), and honest
 **usage counts** (rows, not bytes). Owner/admin only; zero external cost.
 
+### P5 #3 — Revenue & ROI tracking
+Plan: `docs/p5-revenue-plan.md`. Shipped: **one row per lead**
+(`deal_outcomes`: `open|won|lost`, amount, currency, `closed_at`, note),
+manual owner/team entry only — revenue is never inferred or auto-filled.
+Roles: owner/admin/manager; writes append to the lead timeline. Reports show
+**per-currency totals** (no conversion), **ROI and cost-per-won as `null`
+until spend exists in the same currency**, **win rate `null` below 10 closed
+deals**, open pipeline and lost value kept separate, and coverage (leads with
+an outcome / total). Campaign spend is the existing all-time ledger, labelled
+as mixing windows. Included in the ops export/usage. Zero external cost.
+
 ---
 
 ## 4. Architecture Impact

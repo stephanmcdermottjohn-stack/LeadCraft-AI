@@ -587,6 +587,33 @@ class Appointment(Base):
     lead: Mapped[Lead] = relationship()
 
 
+class DealOutcome(Base):
+    """Manually recorded deal result for one lead (P5 #3).
+
+    Revenue is **owner-entered**, never inferred: `amount` + `currency` are what
+    the business typed in. `status` is open | won | lost. Currencies are never
+    converted; reports group totals per currency. One row per lead (upsert).
+    No invoice, payment or gateway is involved.
+    """
+
+    __tablename__ = "deal_outcomes"
+    __table_args__ = (UniqueConstraint("lead_id", name="ux_deal_outcomes_lead"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    lead_id: Mapped[int] = mapped_column(ForeignKey("leads.id"), unique=True, index=True)
+    # open | won | lost
+    status: Mapped[str] = mapped_column(String(10), default="open", index=True)
+    amount: Mapped[float] = mapped_column(Float, default=0.0)
+    currency: Mapped[str] = mapped_column(String(10), default="PKR")
+    closed_at: Mapped[datetime.date | None] = mapped_column(Date, nullable=True, index=True)
+    note: Mapped[str] = mapped_column(String(500), default="")
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 class AuditLog(Base):
     """Append-only workspace audit log of administrative actions (P5 #2).
 
