@@ -120,6 +120,17 @@ deals**, open pipeline and lost value kept separate, and coverage (leads with
 an outcome / total). Campaign spend is the existing all-time ledger, labelled
 as mixing windows. Included in the ops export/usage. Zero external cost.
 
+### Security pass — auth hardening
+
+Production refuses to boot with a missing/default `SECRET_KEY`; auth reads the
+key through Settings (so `backend/.env` works); the frontend Vercel project
+holds only `VITE_API_BASE`. Brute-force protection is DB-backed
+(`auth_throttles`, SHA-256 keys only — no plaintext email/IP): 5 failures per
+email+IP / 15 min and 30 per IP / 15 min lock for 15 min; registration is
+capped at 5 attempts per IP / hour. Locked callers get `429` + `Retry-After`;
+unknown emails return the same `401` and pay the same PBKDF2 cost. Rotation
+steps: `docs/security-rotation-runbook.md`.
+
 ---
 
 ## 4. Architecture Impact

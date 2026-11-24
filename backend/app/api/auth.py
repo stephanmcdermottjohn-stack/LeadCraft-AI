@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.models import ClientSettings, User
 from app.services import auth_service
+from app.services import login_throttle
 from app.services import team as team_service
 
 router = APIRouter(prefix="/api/auth")
@@ -95,7 +96,19 @@ def require_admin(user: User = Depends(get_current_user)) -> User:
 
 
 @router.post("/register", status_code=201)
-def register(body: RegisterBody, db: Session = Depends(get_db)) -> dict:
+def register(body: RegisterBody, request: Request, db: Session = Depends(get_db)) -> dict:
+    ip = login_throttle.client_ip(request)
+    wait = login_throttle.register_retry_after(db, ip)
+    if wait:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many sign-up attempts from this network. Please wait and try again.",
+            headers={"Retry-After": str(wait)},
+        )
+    # Count every attempt, including duplicates: the goal is to stop bulk
+    # account creation and email enumeration from one network.
+    login_throttle.record_register_attempt(db, ip)
+
     existing = db.scalar(select(User).where(User.email == body.email.lower()))
     if existing:
         raise HTTPException(status_code=409, detail="An account with this email already exists.")
@@ -114,11 +127,28 @@ def register(body: RegisterBody, db: Session = Depends(get_db)) -> dict:
 
 
 @router.post("/login")
-def login(body: LoginBody, db: Session = Depends(get_db)) -> dict:
+def login(body: LoginBody, request: Request, db: Session = Depends(get_db)) -> dict:
+    ip = login_throttle.client_ip(request)
+    wait = login_throttle.login_retry_after(db, body.email, ip)
+    if wait:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many failed sign-in attempts. Please wait and try again.",
+            headers={"Retry-After": str(wait)},
+        )
+
     user = db.scalar(select(User).where(User.email == body.email.lower()))
-    if user is None or not auth_service.verify_password(body.password, user.password_hash):
-        # Same response for both cases: do not reveal which emails exist.
+    if user is None:
+        # Same PBKDF2 cost as a real check, then the same response.
+        auth_service.dummy_verify(body.password)
+        login_throttle.record_login_failure(db, body.email, ip)
         raise HTTPException(status_code=401, detail="Invalid email or password.")
+    if not auth_service.verify_password(body.password, user.password_hash):
+        login_throttle.record_login_failure(db, body.email, ip)
+        raise HTTPException(status_code=401, detail="Invalid email or password.")
+
+    # Correct password: forget this email+IP pair (the IP-wide counter stays).
+    login_throttle.clear_login(db, body.email, ip)
     return {"user": build_session_user(db, user), "token": auth_service.issue_token(user.id)}
 
 

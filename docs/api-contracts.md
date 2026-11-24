@@ -21,6 +21,14 @@ Response 200:
 }
 ```
 
+## Live (security pass — auth & brute-force throttling)
+Zero external cost. Counters live in `auth_throttles`, keyed by SHA-256 hashes only — no plaintext email address or IP is stored, and the table is excluded from ops export/usage.
+
+- `POST /api/auth/register` — 201 with `{user, token}`; 409 when the email already exists; 422 for invalid input. **5 attempts per IP per hour → 429 + `Retry-After`** (duplicates count too, so bulk account creation and email enumeration are limited).
+- `POST /api/auth/login` — 200 with `{user, token}`. An unknown email and a wrong password return the **same** `401 {"detail": "Invalid email or password."}`, and unknown emails still pay the full PBKDF2 cost (no timing oracle). **5 failures per email+IP in 15 min → 429 + `Retry-After`, locked 15 min**; **30 failures per IP in 15 min** locks that IP. A correct password while locked is still 429 — the limiter is checked first. A successful login clears the email+IP counter, while the IP-wide counter stays (one valid account cannot reset an attack counter). The 429 message never reveals whether the email exists.
+- `GET /api/auth/me` — Bearer token required.
+- Client IP resolution: `x-real-ip`, `x-vercel-forwarded-for`, then the left-most `x-forwarded-for`; falls back to the socket address (Vercel sets these headers).
+
 ## Live (P4 — integrations & real-time capture)
 Zero external cost and disabled by default: webhook endpoints answer **503** until the server App Secret / verify token exist. Inbound only — no auto-reply, no outbound send.
 

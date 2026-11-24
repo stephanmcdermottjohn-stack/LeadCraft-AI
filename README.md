@@ -64,6 +64,10 @@ pytest
   `powershell -ExecutionPolicy Bypass -File scripts_local/check_secrets.ps1`.
 - `ENVIRONMENT=production` refuses to boot when `SECRET_KEY` is missing or the
   known dev default; tokens are HMAC-signed with a 7-day TTL.
+- Login/registration are throttled (DB-backed, SHA-256 keys only): 5 failures
+  per email+IP / 15 min, 30 per IP / 15 min, 5 sign-ups per IP / hour → `429`
+  with `Retry-After`. Correct passwords are refused while locked, and unknown
+  emails cost the same PBKDF2 time as real ones.
 - Reset a login password without a dashboard:
   `backend/scripts/set_password.py --email <account>` (prompted, not echoed).
 - Only `VITE_API_BASE` belongs in the frontend Vercel project; DB/LLM/signing

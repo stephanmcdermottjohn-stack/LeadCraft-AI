@@ -37,6 +37,17 @@ def verify_password(password: str, stored: str) -> bool:
         return False
 
 
+# Hash of a throwaway value. Unknown-email logins verify against this so the
+# response takes the same PBKDF2 time as a real account (no user enumeration
+# through timing). Computed once at import, never matches a user input.
+TIMING_DUMMY_HASH = hash_password(secrets.token_urlsafe(16))
+
+
+def dummy_verify(password: str) -> None:
+    """Burn the same work as a real password check, for unknown emails."""
+    verify_password(password, TIMING_DUMMY_HASH)
+
+
 def _secret_key() -> str:
     # Read through Settings so a SECRET_KEY placed only in backend/.env (not
     # exported into the process environment) still signs tokens. Falling back

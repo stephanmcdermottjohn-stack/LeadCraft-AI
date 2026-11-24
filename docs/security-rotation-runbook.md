@@ -20,6 +20,7 @@ No secret values appear in this document, in git, or in any deployment file.
 | Backend Vercel project (`lead-craft-api`) environment | `SECRET_KEY` present (64 chars, not the dev default), `ENVIRONMENT=production`, `CORS_ORIGINS` = production frontend only, `DATABASE_URL` = Supabase pooler with password |
 | Signing key source | **Fixed**: `auth_service` read `os.environ` only, so a key placed only in `backend/.env` was ignored. It now reads through `Settings`, and `create_app()` **fails closed** when `ENVIRONMENT=production` and the key is missing or the known dev default. Test: `tests/test_security.py`. |
 | Password storage | PBKDF2-HMAC-SHA256, 390k iterations, 16-byte random salt, constant-time compare |
+| Login throttling | **Added**: DB-backed counters (`auth_throttles`, SHA-256 keys only). 5 failures per email+IP / 15 min → 15 min lock; 30 failures per IP / 15 min; register 5 attempts per IP / hour. `429` + `Retry-After`; correct password still refused while locked; unknown emails pay the same PBKDF2 cost. Test: `tests/test_auth_limits.py`. |
 | Bearer tokens | HMAC-signed, 7-day TTL, stateless; rotating `SECRET_KEY` invalidates all tokens |
 | Webhooks | Fail closed: `503` until the app secret is set; missing/invalid `X-Hub-Signature-256` → `403`; constant-time compare; idempotent event keys |
 | CORS | Explicit origins + `CORS_ORIGINS`; no wildcard |
@@ -27,10 +28,9 @@ No secret values appear in this document, in git, or in any deployment file.
 
 ### Known gaps (not fixed in this pass)
 
-- **No login rate limiting / lockout** on `/api/auth/login` (brute-force risk).
 - **No 2FA** and only a 7-day stateless token (no per-token revocation list).
 - **No self-service password change endpoint** — use `backend/scripts/set_password.py`.
-- Failed logins and other auth events are **not** written to the audit log.
+- Failed logins and other auth events are **not** written to the audit log (throttle counters are kept, but the attempts themselves are not event rows).
 - No CI job runs the secret scanner yet (run it manually before releases).
 
 ---
@@ -124,10 +124,11 @@ again. Do it during a quiet window.
 2. Unauthenticated `GET /api/ops/usage` / `/api/reports/revenue` → `401`.
 3. Login works; Leads, Appointments, Reports load real data.
 4. One write per area: save a note, save a deal outcome, change a setting.
-5. Backend tests: `cd backend; .\.venv\Scripts\python.exe -m pytest -q` (143 passing at the time of this pass).
+5. Backend tests: `cd backend; .\.venv\Scripts\python.exe -m pytest -q` (152 passing at the time of this pass).
 6. Secret scan: `powershell -ExecutionPolicy Bypass -File scripts_local/check_secrets.ps1` → `PASS`.
 7. `git status --short` shows no `.env`, `.vercel-token`, logs or DB files.
 8. Vercel project env lists contain only what each project needs (frontend: `VITE_API_BASE` only).
+9. Throttling (optional prod smoke test): 5 wrong passwords for a non-existent email, then the 6th attempt returns `429` with `Retry-After`. Delete that test row from `auth_throttles` afterwards (`auth_throttles` holds hashed keys only; no user data).
 
 ---
 

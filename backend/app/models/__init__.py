@@ -640,3 +640,24 @@ class AuditLog(Base):
     target_id: Mapped[str] = mapped_column(String(60), default="")
     detail_json: Mapped[str] = mapped_column(Text, default="{}")
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AuthThrottle(Base):
+    """Failed-login / registration counters (security pass).
+
+    DB-backed so the limit survives serverless cold starts (an in-process
+    counter would reset on every Vercel invocation). `key_hash` is a SHA-256
+    hash of the scope label (`login|email|ip`, `login-ip|ip`, `register|ip`),
+    so no plaintext email address or IP is stored. Holds counters only - no
+    passwords, tokens or user data. Old rows are pruned opportunistically.
+    """
+
+    __tablename__ = "auth_throttles"
+
+    key_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    failures: Mapped[int] = mapped_column(Integer, default=0)
+    window_start: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    locked_until: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
