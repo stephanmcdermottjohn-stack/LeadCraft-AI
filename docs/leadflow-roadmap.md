@@ -120,6 +120,18 @@ deals**, open pipeline and lost value kept separate, and coverage (leads with
 an outcome / total). Campaign spend is the existing all-time ledger, labelled
 as mixing windows. Included in the ops export/usage. Zero external cost.
 
+### P6 #1 — Duplicate lead detection & safe merge
+Plan: `docs/p6-dedupe-plan.md`. Shipped: **exact normalized phone/email
+grouping only** (digits + last-10 compare with `+92`/`00` collapsed; emails
+trimmed/lowercased; names never fuzzy-matched), per-lead candidate view with
+honest conflicts, and an **owner/admin-only merge** with a dry-run preview.
+Merge moves all child history to the kept lead before deleting duplicates,
+fills only empty primary fields, keeps intent notes labelled, **never sums deal
+outcomes**, fills only *unknown* qualification dimensions, merges same-channel
+conversations with messages preserved, reports nurture collisions instead of
+duplicating them, and relinks referrals. One timeline activity + one
+`lead.merged` audit row (ids/counts only). No schema change, zero external cost.
+
 ### Security pass — auth hardening
 
 Production refuses to boot with a missing/default `SECRET_KEY`; auth reads the

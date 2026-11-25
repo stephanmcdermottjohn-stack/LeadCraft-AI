@@ -224,6 +224,18 @@ Owner/admin/manager only for money (agent/viewer → 403, unauth → 401). Manua
 - Ops: `deal_outcomes` included in `/api/ops/export` and `/api/ops/usage`.
 - Frontend: Leads → per-lead "Deal" toggle (status/amount/currency/close date/note, save/remove, role-gated); Reports → "Revenue & ROI" card with per-currency + by-campaign tables and honest unknown labels.
 
+## Live (P6 #1 — duplicate detection & safe merge)
+Zero external cost, no schema change, no fuzzy matching. Reads are available to every authenticated role in their own workspace. Merge is **owner/admin only** (manager/agent/viewer → 403; unauth → 401); every route is tenant-scoped (another workspace → 404).
+
+- `GET /api/leads/duplicates?limit=1..200` — groups of leads sharing a normalized phone or lowercased email. Returns `groups[{key, matched_on: [phone|email], leads[]}]`, `groups_total`, `scanned` (≤5,000), `truncated`, `notes`. Phone normalization: digits only, `00` stripped, `+92`/`92` collapsed, compared on the last 10 digits; numbers shorter than 7 digits are ignored. Names are never fuzzy-matched.
+- `GET /api/leads/{id}/duplicates` — candidates for one lead with `matched_on` plus honest `conflicts` (e.g. matched on email but the phone numbers differ). `404` for another workspace's lead.
+- `POST /api/leads/merge` — body `{primary_id, duplicate_ids: 1..10, dry_run?: false}`. `dry_run: true` returns the identical summary without changing anything.
+  - Moves notes, stage history, activities, score history, appointments, review requests, webhook delivery links and referral links. Nurture enrollments in a campaign the primary already has are reported as conflicts and **not duplicated**. Conversations on the same channel are merged into the primary thread with every message preserved.
+  - **Deal outcomes are never summed**: if the primary already has one it wins, and the duplicate's amount is reported as a conflict, not revenue. Qualification fills only **unknown** primary dimensions from known duplicate values; known primary values are never overwritten.
+  - Empty primary fields (name/phone/email/area/attribution/metadata…) are filled from duplicates and listed in `fields_filled`. Differing status/stage/source values are listed in `conflicts` (primary wins).
+  - Duplicate lead rows are deleted only after their history has moved. One `duplicate_merged` activity is appended to the primary timeline, and one `lead.merged` audit row records ids/counts (no contact data).
+  - Invalid input (primary also listed as duplicate, empty list, >10 duplicates) → `400`; another workspace's ids → `404`.
+
 ## Ground rules encoded in contracts (Section 0 of the roadmap)
 - Every lead write requires a `source` from the allowlist and a `consent_timestamp`.
 - No endpoint creates outbound-first contact. `messages.direction=in` rows must exist before the bot replies.

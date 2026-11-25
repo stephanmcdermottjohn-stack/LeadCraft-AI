@@ -2065,6 +2065,212 @@ function LandingPage({ slug }) {
   );
 }
 
+function DuplicateLeadsPanel({ onMerged }) {
+  const role = getUser()?.role ?? "owner";
+  const canMerge = ["owner", "admin"].includes(role);
+  const [open, setOpen] = useState(false);
+  const [data, setData] = useState(null);
+  const [error, setError] = useState("");
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [primaryPick, setPrimaryPick] = useState({}); // group key -> lead id to keep
+  const [preview, setPreview] = useState(null); // { groupKey, summary }
+
+  const load = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      setData(await api("/api/leads/duplicates"));
+    } catch (err) {
+      setError(err instanceof Error ? err.message.replace(/^API \d+: /, "") : "Scan failed.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    if (open) load();
+  }, [open]);
+
+  const primaryOf = (group) => primaryPick[group.key] ?? group.leads[0].id;
+
+  const runMerge = async (group, dryRun) => {
+    const primary_id = primaryOf(group);
+    const duplicate_ids = group.leads.filter((l) => l.id !== primary_id).map((l) => l.id);
+    if (!duplicate_ids.length) return;
+    if (
+      !dryRun &&
+      !window.confirm(
+        `Merge ${duplicate_ids.length} duplicate lead(s) into #${primary_id}?\n\n` +
+          "Their notes, timeline, appointments, conversations and other history move to the kept lead. " +
+          "The duplicate lead rows are then deleted. Deal outcomes are never summed."
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    setError("");
+    setMsg("");
+    try {
+      const body = await api("/api/leads/merge", {
+        method: "POST",
+        body: JSON.stringify({ primary_id, duplicate_ids, dry_run: dryRun }),
+      });
+      if (dryRun) {
+        setPreview({ groupKey: group.key, summary: body });
+      } else {
+        setPreview(null);
+        setMsg(`Merged ${duplicate_ids.length} duplicate(s) into lead #${primary_id}.`);
+        await load();
+        onMerged?.();
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message.replace(/^API \d+: /, "") : "Merge failed.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const movedLines = (moved) =>
+    Object.entries(moved ?? {})
+      .filter(([, value]) => Number(value) > 0)
+      .map(([key, value]) => `${key.replaceAll("_", " ")}: ${value}`);
+
+  return (
+    <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 text-sm">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <p className="font-semibold">Duplicate leads</p>
+          <p className="text-xs text-slate-400">
+            Exact phone/email matches only - names are never fuzzy-matched and nothing is merged without your confirmation.
+          </p>
+        </div>
+        <button
+          className="rounded-lg bg-slate-800 px-3 py-2 text-xs hover:bg-slate-700"
+          onClick={() => {
+            setOpen(!open);
+            setMsg("");
+            setPreview(null);
+          }}
+        >
+          {open ? "Hide duplicates" : "Scan for duplicates"}
+        </button>
+      </div>
+
+      {open && (
+        <div className="mt-3 space-y-3">
+          {busy && <p className="text-xs text-slate-400">Working…</p>}
+          {error && <p className="text-xs text-red-400">{error}</p>}
+          {msg && <p className="text-xs text-emerald-300">{msg}</p>}
+          {!canMerge && (
+            <p className="text-xs text-amber-300">
+              You can review matches, but only an owner or admin can merge leads.
+            </p>
+          )}
+          {data && data.groups.length === 0 && (
+            <p className="text-xs text-slate-400">
+              No duplicates found among {data.scanned} lead(s).{" "}
+              {data.truncated ? "Only the first 5,000 leads were scanned." : ""}
+            </p>
+          )}
+          {data?.groups.map((group) => {
+            const previewHere = preview?.groupKey === group.key ? preview.summary : null;
+            return (
+              <div key={group.key} className="rounded-lg border border-slate-800 bg-slate-950 p-3">
+                <p className="text-xs text-slate-400">
+                  Matched on <span className="text-sky-300">{group.matched_on.join(" + ")}</span> · choose the lead to keep:
+                </p>
+                <ul className="mt-2 space-y-1">
+                  {group.leads.map((l) => (
+                    <li key={l.id} className="text-xs">
+                      <label className="flex flex-wrap items-center gap-2">
+                        <input
+                          type="radio"
+                          name={`dup-primary-${group.key}`}
+                          checked={primaryOf(group) === l.id}
+                          onChange={() => {
+                            setPrimaryPick((s) => ({ ...s, [group.key]: l.id }));
+                            setPreview(null);
+                          }}
+                          disabled={!canMerge}
+                        />
+                        <span className="font-semibold">#{l.id} {l.name || "(no name)"}</span>
+                        <span className="text-slate-400">
+                          {[l.phone, l.email, l.status, l.source].filter(Boolean).join(" · ")}
+                        </span>
+                        {l.created_at && (
+                          <span className="text-slate-500">created {new Date(l.created_at).toLocaleDateString()}</span>
+                        )}
+                      </label>
+                    </li>
+                  ))}
+                </ul>
+                {canMerge && (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <button
+                      className="rounded bg-slate-800 px-2 py-1 text-xs hover:bg-slate-700"
+                      onClick={() => runMerge(group, true)}
+                      disabled={busy}
+                    >
+                      Preview merge
+                    </button>
+                    <button
+                      className="rounded bg-emerald-900 px-2 py-1 text-xs hover:bg-emerald-800"
+                      onClick={() => runMerge(group, false)}
+                      disabled={busy}
+                    >
+                      Merge
+                    </button>
+                  </div>
+                )}
+                {previewHere && (
+                  <div className="mt-2 rounded border border-slate-800 bg-slate-900 p-2 text-xs space-y-1">
+                    <p className="font-semibold text-slate-200">
+                      Preview: keep #{previewHere.primary.id}{" "}
+                      {previewHere.primary.name ? `(${previewHere.primary.name})` : ""}
+                    </p>
+                    <p className="text-slate-400">
+                      {movedLines(previewHere.moved).length
+                        ? movedLines(previewHere.moved).join(" · ")
+                        : "No child records to move."}
+                    </p>
+                    {previewHere.fields_filled.length > 0 && (
+                      <p className="text-sky-300">Filled from duplicate: {previewHere.fields_filled.join(", ")}</p>
+                    )}
+                    {previewHere.conflicts.length > 0 && (
+                      <ul className="list-disc pl-4 text-amber-300">
+                        {previewHere.conflicts.map((conflict, i) => (
+                          <li key={i}>{conflict}</li>
+                        ))}
+                      </ul>
+                    )}
+                    {previewHere.notes.map((note, i) => (
+                      <p key={i} className="text-slate-500">{note}</p>
+                    ))}
+                    <button
+                      className="rounded bg-emerald-900 px-2 py-1 text-xs hover:bg-emerald-800"
+                      onClick={() => runMerge(group, false)}
+                      disabled={busy}
+                    >
+                      Confirm merge
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          {data && data.groups.length > 0 && (
+            <p className="text-xs text-slate-500">
+              {data.groups_total} group(s) found among {data.scanned} scanned lead(s).
+              {data.truncated ? " Only the first 5,000 leads were scanned." : ""}
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function LeadsPanel() {
   const [leads, setLeads] = useState([]);
   const [error, setError] = useState("");
@@ -2519,6 +2725,7 @@ function LeadsPanel() {
   return (
     <div className="space-y-4 max-w-2xl">
       {error && <p className="text-xs text-red-400">{error}</p>}
+      <DuplicateLeadsPanel onMerged={() => loadLeads({ q, status: statusFilter, source: sourceFilter })} />
       <div className="flex flex-wrap gap-2 items-center">
         <input
           className="flex-1 min-w-40 rounded-lg bg-slate-800 px-3 py-2 text-sm"

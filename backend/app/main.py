@@ -14,6 +14,7 @@ from app.api.attribution import router as attribution_router
 from app.api.auth import router as auth_router
 from app.api.billing import router as billing_router
 from app.api.content import router as content_router
+from app.api.dedupe import router as dedupe_router
 from app.api.health import router as health_router
 from app.api.icp import router as icp_router
 from app.api.inbox import router as inbox_router
@@ -121,6 +122,7 @@ def create_app() -> FastAPI:
     app.include_router(content_router)
     app.include_router(settings_router)
     app.include_router(leads_router)
+    app.include_router(dedupe_router)
     app.include_router(public_router)
     app.include_router(icp_router)
     app.include_router(landing_ab_router)
