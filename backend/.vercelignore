@@ -1,0 +1,22 @@
+# Never upload local secrets, virtualenvs, test data or logs to Vercel.
+.env
+.env.*
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+tests/
+scripts/
+dev.db
+*.db
+*.sqlite
+*.sqlite3
+*.log
+backend.log
+.vercel/
+.vercelignore
+.git/
+.gitignore

@@ -23,3 +23,7 @@ Thumbs.db
 *.log
 
 .vercel-token
+
+# Vercel CLI local artifacts
+.vercel/
+vcp_*
