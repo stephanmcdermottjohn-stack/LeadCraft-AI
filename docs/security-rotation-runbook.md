@@ -15,7 +15,7 @@ No secret values appear in this document, in git, or in any deployment file.
 |---|---|
 | Git-tracked files for secrets (Google/Groq/OpenAI keys, private keys, Postgres URLs with passwords, JWTs, AWS/GitHub/Slack tokens) | **Clean** — scanner passes on all 139 tracked files |
 | Git history (39 commits) for leaked values (`salon-owner-2026`, `LC-admin-…`, `smoke-test-pass-1`, verify token, `AIza`, `gsk_`, `postgresql://`, `eyJhbGciOi`, `service_role`) | **Clean** — only placeholder examples in `docs/.env.example` |
-| `.env`, `.env.*`, `.vercel-token`, `*.log`, `*.db` ignored | **Yes** — verified with `git check-ignore` |
+| `.env`, `.env.*`, `.vercel/`, `vcp_*`, `*.log`, `*.db` ignored | **Yes** — verified with `git check-ignore` |
 | Frontend Vercel project (`lead-craft-ai`) environment | **Fixed**: it held backend-only `DATABASE_URL`, `SECRET_KEY`, `GEMINI_API_KEY`, `GEMINI_MODEL`, `LLM_PROVIDER`, `ENVIRONMENT`, `APP_DISABLE_SCHEDULER`. All removed; only `VITE_API_BASE` remains. The static frontend never needed them. |
 | Backend Vercel project (`lead-craft-api`) environment | `SECRET_KEY` present (64 chars, not the dev default), `ENVIRONMENT=production`, `CORS_ORIGINS` = production frontend only, `DATABASE_URL` = Supabase pooler with password |
 | Signing key source | **Fixed**: `auth_service` read `os.environ` only, so a key placed only in `backend/.env` was ignored. It now reads through `Settings`, and `create_app()` **fails closed** when `ENVIRONMENT=production` and the key is missing or the known dev default. Test: `tests/test_security.py`. |
@@ -88,17 +88,21 @@ cd backend
    - `service_role` must never appear in a browser bundle or a `VITE_*`/`NEXT_PUBLIC_*` variable.
 3. Redeploy CareerBridge and smoke-test its main flow.
 
-### 2.5 Vercel token (`.vercel-token`)
+### 2.5 Vercel CLI session (no token file)
 
-The local deploy script reads this token; it expires soon and must not be committed.
+Deploys use the Vercel CLI OAuth device login. The repo no longer stores a token
+file, and `.vercel/` CLI state is git-ignored.
 
-1. Vercel → Account Settings → **Tokens** → revoke the old token → create a new one scoped to the needed team/projects (shortest practical expiry).
-2. Save it to `.vercel-token` in the repo root (already git-ignored):
-   ```powershell
-   Set-Content -NoNewline .vercel-token "PASTE_TOKEN_HERE"
-   ```
-3. Confirm it is untracked: `git status --short` must not list `.vercel-token`.
-4. Verify: `.\scripts_local\vercel_deploy.ps1 -Which backend` reaches `READY`.
+1. Log in: `npx vercel@latest login`, then approve the device code in a browser
+   signed in as the account that owns the `lead-generators` team.
+2. Verify: `npx vercel@latest whoami` prints the owner username and
+   `npx vercel@latest teams ls` lists `lead-generators`.
+3. Retired API tokens (`leadcraft-deploy`, `LeadAI-New`) are not referenced by the
+   repo, CI or Vercel env. Revoke them at Vercel → Account Settings → **Tokens**
+   unless an external script still uses them.
+4. Never create a **Protection Bypass for Automation** secret for these projects;
+   deployment protection stays on.
+5. Verify: `.\scripts_local\vercel_deploy.ps1 -Which backend` reaches `READY`.
 
 ### 2.6 `SECRET_KEY` (optional, logs everyone out)
 
@@ -126,7 +130,7 @@ again. Do it during a quiet window.
 4. One write per area: save a note, save a deal outcome, change a setting.
 5. Backend tests: `cd backend; .\.venv\Scripts\python.exe -m pytest -q` (152 passing at the time of this pass).
 6. Secret scan: `powershell -ExecutionPolicy Bypass -File scripts_local/check_secrets.ps1` → `PASS`.
-7. `git status --short` shows no `.env`, `.vercel-token`, logs or DB files.
+7. `git status --short` shows no `.env`, `.vercel/`, logs or DB files.
 8. Vercel project env lists contain only what each project needs (frontend: `VITE_API_BASE` only).
 9. Throttling (optional prod smoke test): 5 wrong passwords for a non-existent email, then the 6th attempt returns `429` with `Retry-After`. Delete that test row from `auth_throttles` afterwards (`auth_throttles` holds hashed keys only; no user data).
 
@@ -139,6 +143,14 @@ again. Do it during a quiet window.
 3. Review Vercel logs and the workspace audit log (`/api/ops/audit`) for unexpected actions.
 4. Rotate `SECRET_KEY` if tokens could have been forged.
 5. Run the scanner and `git log -S "<value>" --all` to confirm the value never entered git. If it did, treat history as compromised (rewrite history is not a substitute for rotation).
+6. Check Vercel deployment sources for leaked files. `backend/.vercelignore` must
+   keep `.env*`, tests, `dev.db`, logs and `scripts/` out of every build:
+   ```powershell
+   npx vercel@latest api "/v6/deployments?projectId=prj_xXvVvel33LHIYYkB6RtwxRRQKHJW&limit=20" --scope lead-generators
+   ```
+   then inspect each `dpl_*` with `"/v6/deployments/<id>/files"`. Delete any
+   superseded deployment whose tree contains a real `.env` (keep the current
+   production deployment). Deleting a deployment does not replace rotation.
 
 ---
 

@@ -40,10 +40,15 @@ foreach ($s in @(".env", "backend/.env", "frontend/.env", ".vercel-token")) {
     }
 }
 
+# Vercel deploys now use `vercel login`; a token file should no longer exist.
+if (Test-Path ".vercel-token") {
+    "NOTE: .vercel-token exists but is deprecated - deploys use `npx vercel@latest login` now. Delete the file."
+}
+
 if ($hits -gt 0) {
     "FAIL: $hits potential secret finding(s). Never commit these; rotate and remove them."
     exit 1
 }
 
-"PASS: no obvious secrets in tracked files; .env/.vercel-token are untracked."
+"PASS: no obvious secrets in tracked files; .env files are untracked and no Vercel token file is tracked."
 exit 0

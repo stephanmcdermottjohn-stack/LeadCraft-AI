@@ -1,59 +1,54 @@
-# Deploys LeadCraft AI projects via REST API with path remapping.
-# Backend project gets backend/* remapped to root (official FastAPI layout).
-# Frontend project gets frontend/* remapped to root (Vite preset layout).
-param([Parameter(Mandatory=$true)][string]$Which)
+# Deploys LeadCraft AI (backend or frontend) with the Vercel CLI.
+# Auth: `npx vercel@latest login` (OAuth device flow) as a member of the
+# `lead-generators` team. No token file is read, stored or printed.
+# Usage: powershell -ExecutionPolicy Bypass -File scripts_local/vercel_deploy.ps1 -Which backend|frontend
+param(
+    [Parameter(Mandatory = $true)]
+    [ValidateSet("backend", "frontend")]
+    [string]$Which
+)
 $ErrorActionPreference = "Stop"
-Set-Location "E:\VirtualMarketingPlatform"
+$root = Split-Path -Parent $PSScriptRoot
+$scope = "lead-generators"
 
-$token = Get-Content .vercel-token -Raw
-$h = @{ Authorization = "Bearer $token"; "Content-Type" = "application/json" }
-
-$files = @()
-foreach ($f in (git ls-files)) {
-    if (-not (Test-Path $f)) { continue }
-    if ($Which -eq "backend") {
-        if (-not $f.StartsWith("backend/")) { continue }
-        $dest = $f.Substring("backend/".Length)
-    } else {
-        if (-not ($f.StartsWith("frontend/") -or $f -eq ".gitignore")) { continue }
-        $dest = if ($f.StartsWith("frontend/")) { $f.Substring("frontend/".Length) } else { $f }
-    }
-    $b64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes((Resolve-Path $f).Path))
-    $files += @{ file = $dest; data = $b64; encoding = "base64" }
-}
-"[$Which] uploading $($files.Count) files..."
-
-$name = if ($Which -eq "backend") { "lead-craft-api" } else { "lead-craft-ai" }
-$bodyObj = @{
-    name   = $name
-    target = "production"
-    files  = $files
-}
-$body = ConvertTo-Json $bodyObj -Depth 5
-
+Push-Location $root
 try {
-    $dep = Invoke-RestMethod -Method Post -Uri "https://api.vercel.com/v13/deployments" -Headers $h -Body $body
-} catch {
-    "deploy POST failed: $($_.ErrorDetails.Message)"
-    exit 1
-}
-
-$depId = $dep.uid
-"url: $($dep.url)"
-"state: $($dep.readyState) - building..."
-
-$deadline = (Get-Date).AddMinutes(10)
-while ((Get-Date) -lt $deadline) {
-    Start-Sleep -Seconds 10
-    $deps = Invoke-RestMethod -Uri "https://api.vercel.com/v6/deployments?app=$name&limit=1&target=production" -Headers $h
-    $d = $deps.deployments[0]
-    if ($d.readyState -in @("READY", "ERROR", "CANCELED")) {
-        "final state: $($d.readyState)"
-        if ($d.readyState -ne "READY") {
-            $logs = Invoke-RestMethod -Uri "https://api.vercel.com/v2/deployments/$($d.uid)/events?limit=60&builds=1" -Headers $h
-            ($logs | ForEach-Object { $_.payload.text }) | Where-Object { $_ } | Select-Object -Last 30
-        }
-        exit
+    # Preflight: the CLI must be logged in and the team must be visible.
+    $who = (npx --yes vercel@latest whoami 2>&1 | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0) {
+        "Not logged in to Vercel. Run: npx --yes vercel@latest login"
+        "Then sign in with the account that owns the '$scope' team."
+        exit 1
     }
+    "logged in as: $who"
+
+    $teams = (npx --yes vercel@latest teams ls 2>&1 | Out-String)
+    if ($teams -notmatch [regex]::Escape($scope)) {
+        "Team '$scope' is not visible to this account."
+        "Log out and log in again with the correct Vercel account: npx --yes vercel@latest logout; npx --yes vercel@latest login"
+        exit 1
+    }
+
+    if ($Which -eq "backend") {
+        $ignore = Join-Path $root "backend\.vercelignore"
+        if (-not (Test-Path $ignore)) {
+            "Missing backend\.vercelignore - refusing to deploy (it keeps .env, tests, DB and logs out of the build)."
+            exit 1
+        }
+    }
+
+    $dir = Join-Path $root $Which
+    "deploying $Which from $dir ..."
+    Push-Location $dir
+    try {
+        npx --yes vercel@latest deploy --prod --scope $scope --yes
+        $code = $LASTEXITCODE
+    }
+    finally {
+        Pop-Location
+    }
+    exit $code
 }
-"timeout waiting for deployment $depId"
+finally {
+    Pop-Location
+}

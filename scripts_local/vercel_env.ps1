@@ -1,47 +1,80 @@
-# Sets LeadCraft AI env vars on the Vercel project (production + preview).
-# Token read from .vercel-token (gitignored). Secrets come from backend/.env.
-$ErrorActionPreference = "Stop"
-Set-Location "E:\VirtualMarketingPlatform"
-
-$token = Get-Content .vercel-token -Raw
-$projectId = "prj_xCLfLGn3VUQeYtmGk3fMtURVmy0R"
-
-# Read backend/.env key=value pairs
-$envMap = @{}
-Get-Content backend\.env | ForEach-Object {
-    if ($_ -match '^\s*([A-Z_]+)\s*=\s*(.*)\s*$') { $envMap[$Matches[1]] = $Matches[2].Trim() }
-}
-
-# Production SECRET_KEY: rotate from the dev value (tokens are stateless HMAC;
-# old local tokens stop working on prod — expected).
-$bytes = New-Object byte[] 32
-[System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
-$prodSecret = [System.BitConverter]::ToString($bytes).Replace("-", "").ToLower()
-
-$vars = @(
-    @{ key = "DATABASE_URL";       value = $envMap["DATABASE_URL"];      target = @("production", "preview"); type = "encrypted" },
-    @{ key = "SECRET_KEY";         value = $prodSecret;                  target = @("production", "preview"); type = "encrypted" },
-    @{ key = "ENVIRONMENT";        value = "production";                 target = @("production", "preview"); type = "plain" },
-    @{ key = "LLM_PROVIDER";       value = "gemini";                     target = @("production", "preview"); type = "plain" },
-    @{ key = "GEMINI_API_KEY";     value = $envMap["GEMINI_API_KEY"];    target = @("production", "preview"); type = "encrypted" },
-    @{ key = "GEMINI_MODEL";       value = $envMap["GEMINI_MODEL"];      target = @("production", "preview"); type = "plain" },
-    @{ key = "APP_DISABLE_SCHEDULER"; value = "1";                       target = @("production", "preview"); type = "plain" }
+# Sets LeadCraft AI backend env vars on Vercel (production + preview) with the Vercel CLI.
+# Values are read from backend/.env and piped through stdin - never printed and never
+# passed on the command line. Auth: `npx vercel@latest login` (team: lead-generators).
+# Usage: powershell -ExecutionPolicy Bypass -File scripts_local/vercel_env.ps1 [-RotateSecretKey] [-DryRun]
+#   -RotateSecretKey  generate a fresh 64-char SECRET_KEY (logs every user out)
+#   -DryRun           only list the keys that would be set
+param(
+    [switch]$RotateSecretKey,
+    [switch]$DryRun
 )
+$ErrorActionPreference = "Stop"
+$root = Split-Path -Parent $PSScriptRoot
+$backend = Join-Path $root "backend"
+$scope = "lead-generators"
+$envFile = Join-Path $backend ".env"
 
-$headers = @{ Authorization = "Bearer $token"; "Content-Type" = "application/json" }
-
-# Remove any existing vars with the same keys first (idempotent re-run)
-$existing = Invoke-RestMethod -Uri "https://api.vercel.com/v9/projects/$projectId/env" -Headers $headers
-foreach ($k in ($existing.envs | ForEach-Object { $_.key }) | Select-Object -Unique) {
-    if ($vars | Where-Object { $_.key -eq $k }) {
-        try { Invoke-RestMethod -Method Delete -Uri "https://api.vercel.com/v9/projects/$projectId/env/$k`?systemEnvironment=0" -Headers $headers | Out-Null } catch {}
-    }
+if (-not (Test-Path $envFile)) {
+    "backend\.env not found - nothing to read."
+    exit 1
 }
 
-$body = ConvertTo-Json @($vars) -Depth 5
+# Read backend/.env key=value pairs (values stay in memory).
+$envMap = @{}
+Get-Content $envFile | ForEach-Object {
+    if ($_ -match '^\s*([A-Z_][A-Z0-9_]*)\s*=\s*(.*)\s*$') { $envMap[$Matches[1]] = $Matches[2].Trim() }
+}
+
+if ($RotateSecretKey) {
+    $bytes = New-Object byte[] 32
+    [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+    $prodSecret = ([System.BitConverter]::ToString($bytes)).Replace("-", "").ToLower()
+} else {
+    $prodSecret = $envMap["SECRET_KEY"]
+}
+
+$vars = [ordered]@{
+    DATABASE_URL          = $envMap["DATABASE_URL"]
+    SECRET_KEY            = $prodSecret
+    ENVIRONMENT           = "production"
+    LLM_PROVIDER          = "gemini"
+    GEMINI_API_KEY        = $envMap["GEMINI_API_KEY"]
+    GEMINI_MODEL          = $envMap["GEMINI_MODEL"]
+    APP_DISABLE_SCHEDULER = "1"
+    CORS_ORIGINS          = "https://lead-craft-ai.vercel.app"
+}
+
+$missing = @($vars.Keys | Where-Object { [string]::IsNullOrWhiteSpace([string]$vars[$_]) })
+if ($missing.Count -gt 0) {
+    "Refusing to run - missing/empty values for: $($missing -join ', ')"
+    exit 1
+}
+
+if ($DryRun) {
+    "Would set on lead-craft-api (production, preview):"
+    $vars.Keys | ForEach-Object { "  $_" }
+    exit 0
+}
+
+Push-Location $backend
 try {
-    $res = Invoke-RestMethod -Method Post -Uri "https://api.vercel.com/v10/projects/$projectId/env" -Headers $headers -Body $body
-    "created: $($res.created.Count)"
-} catch {
-    "create failed: $($_.ErrorDetails.Message)"
+    $failed = 0
+    foreach ($key in $vars.Keys) {
+        $value = [string]$vars[$key]
+        $value | npx --yes vercel@latest env add $key --environment production,preview --force --scope $scope 2>&1 | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            "OK   $key"
+        } else {
+            "FAIL $key"
+            $failed++
+        }
+    }
+    if ($failed -gt 0) {
+        "$failed variable(s) failed to set."
+        exit 1
+    }
+    "done - redeploy with: .\scripts_local\vercel_deploy.ps1 -Which backend"
+}
+finally {
+    Pop-Location
 }

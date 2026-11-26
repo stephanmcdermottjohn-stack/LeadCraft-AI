@@ -54,7 +54,7 @@ pytest
 - **Frontend:** https://lead-craft-ai.vercel.app (dashboard at `/`, public landing pages at `/l/<slug>`)
 - **API:** https://lead-craft-api.vercel.app (FastAPI on Vercel Functions, Python 3.12)
 - **DB:** Supabase Postgres (pooler); env vars live in Vercel project settings — never in the repo
-- Deploy: `powershell -ExecutionPolicy Bypass -File scripts_local/vercel_deploy.ps1 -Which backend|frontend` (token in `.vercel-token`, gitignored)
+- Deploy: `powershell -ExecutionPolicy Bypass -File scripts_local/vercel_deploy.ps1 -Which backend|frontend` (requires `npx vercel@latest login` as a `lead-generators` team member; no token file)
 - Serverless notes: background worker loop is disabled (`APP_DISABLE_SCHEDULER=1`); due scheduled posts flip to `ready_to_publish` lazily on posts read. Cold starts re-run `create_all` (idempotent).
 
 ## Security

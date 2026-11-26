@@ -1,48 +1,35 @@
-# Configures the backend project (rootDirectory, env) + frontend env.
+# One-time Vercel bootstrap for LeadCraft AI using the Vercel CLI (no token file).
+# Auth: `npx vercel@latest login` as a member of the `lead-generators` team.
+# Does: backend env vars (via vercel_env.ps1) + frontend VITE_API_BASE.
+# Dashboard-only steps (cannot be done by this script): project root directory,
+# deployment protection, domains.
+# Usage: powershell -ExecutionPolicy Bypass -File scripts_local/vercel_setup.ps1
 $ErrorActionPreference = "Stop"
-Set-Location "E:\VirtualMarketingPlatform"
+$root = Split-Path -Parent $PSScriptRoot
+$scope = "lead-generators"
+$apiUrl = "https://lead-craft-api.vercel.app"
 
-$token = Get-Content .vercel-token -Raw
-$h = @{ Authorization = "Bearer $token"; "Content-Type" = "application/json" }
-$frontendId = "prj_xCLfLGn3VUQeYtmGk3fMtURVmy0R"
-$backendId = "prj_xXvVvel33LHIYYkB6RtwxRRQKHJW"
+& (Join-Path $PSScriptRoot "vercel_env.ps1")
+if ($LASTEXITCODE -ne 0) { exit 1 }
 
-$b = Invoke-RestMethod -Method Patch -Uri "https://api.vercel.com/v9/projects/$backendId" -Headers $h -Body '{"rootDirectory": "backend"}'
-"backend: rootDirectory=$($b.rootDirectory) name=$($b.name)"
-
-$envMap = @{}
-Get-Content backend\.env | ForEach-Object {
-    if ($_ -match '^\s*([A-Z_]+)\s*=\s*(.*)\s*$') { $envMap[$Matches[1]] = $Matches[2].Trim() }
-}
-$bytes = New-Object byte[] 32
-[System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
-$prodSecret = [System.BitConverter]::ToString($bytes).Replace("-", "").ToLower()
-
-$vars = @(
-    @{ key = "DATABASE_URL";          value = $envMap["DATABASE_URL"];   target = @("production", "preview"); type = "encrypted" },
-    @{ key = "SECRET_KEY";            value = $prodSecret;               target = @("production", "preview"); type = "encrypted" },
-    @{ key = "ENVIRONMENT";           value = "production";              target = @("production", "preview"); type = "plain" },
-    @{ key = "LLM_PROVIDER";          value = "gemini";                  target = @("production", "preview"); type = "plain" },
-    @{ key = "GEMINI_API_KEY";        value = $envMap["GEMINI_API_KEY"]; target = @("production", "preview"); type = "encrypted" },
-    @{ key = "GEMINI_MODEL";          value = $envMap["GEMINI_MODEL"];   target = @("production", "preview"); type = "plain" },
-    @{ key = "APP_DISABLE_SCHEDULER"; value = "1";                       target = @("production", "preview"); type = "plain" },
-    @{ key = "CORS_ORIGINS";          value = "https://lead-craft-ai.vercel.app"; target = @("production", "preview"); type = "plain" }
-)
-
-$existing = Invoke-RestMethod -Uri "https://api.vercel.com/v9/projects/$backendId/env" -Headers $h
-foreach ($k in ($existing.envs | ForEach-Object { $_.key }) | Select-Object -Unique) {
-    if ($vars | Where-Object { $_.key -eq $k }) {
-        try { Invoke-RestMethod -Method Delete -Uri "https://api.vercel.com/v9/projects/$backendId/env/$k" -Headers $h | Out-Null } catch {}
+Push-Location (Join-Path $root "frontend")
+try {
+    $apiUrl | npx --yes vercel@latest env add VITE_API_BASE --environment production,preview --force --scope $scope 2>&1 | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        "frontend env VITE_API_BASE set"
+    } else {
+        "frontend env VITE_API_BASE failed"
+        exit 1
     }
 }
-$varBody = ConvertTo-Json @($vars) -Depth 5
-$res = Invoke-RestMethod -Method Post -Uri "https://api.vercel.com/v10/projects/$backendId/env" -Headers $h -Body $varBody
-"backend env created: $($res.created.Count)"
-
-$feExisting = Invoke-RestMethod -Uri "https://api.vercel.com/v9/projects/$frontendId/env" -Headers $h
-if ($feExisting.envs | Where-Object { $_.key -eq "VITE_API_BASE" }) {
-    try { Invoke-RestMethod -Method Delete -Uri "https://api.vercel.com/v9/projects/$frontendId/env/VITE_API_BASE" -Headers $h | Out-Null } catch {}
+finally {
+    Pop-Location
 }
-$feBody = ConvertTo-Json @{ key = "VITE_API_BASE"; value = "https://lead-craft-api.vercel.app"; target = @("production", "preview"); type = "plain" } -Depth 4
-Invoke-RestMethod -Method Post -Uri "https://api.vercel.com/v10/projects/$frontendId/env" -Headers $h -Body $feBody | Out-Null
-"frontend env VITE_API_BASE set"
+
+@"
+Remaining dashboard-only steps:
+  1. lead-craft-api + lead-craft-ai -> Settings -> General -> Root Directory: leave empty
+     (each project is deployed from its own folder).
+  2. Deployment Protection stays on; do not add Protection Bypass secrets.
+  3. Domains: lead-craft-ai.vercel.app (frontend), lead-craft-api.vercel.app (API).
+"@
