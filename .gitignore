@@ -27,3 +27,5 @@ Thumbs.db
 # Vercel CLI local artifacts
 .vercel/
 vcp_*
+.vercel
+.env*
