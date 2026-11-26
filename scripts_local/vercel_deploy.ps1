@@ -37,7 +37,10 @@ try {
         }
     }
 
-    $dir = Join-Path $root $Which
+    # The frontend project has Root Directory = frontend, so the CLI must run from
+    # the repo root (Vercel then builds the frontend/ subfolder). The backend has no
+    # Root Directory setting and is deployed from backend/.
+    $dir = if ($Which -eq "frontend") { $root } else { Join-Path $root $Which }
     "deploying $Which from $dir ..."
     Push-Location $dir
     try {

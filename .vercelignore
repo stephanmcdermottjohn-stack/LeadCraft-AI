@@ -1,8 +1,39 @@
 # Never ship these to Vercel.
+# Root-level deploys target the frontend project (rootDirectory=frontend);
+# the backend is deployed from backend/ and uses backend/.vercelignore.
+/backend/
+/docs/
+/scripts_local/
+README.md
+DEPLOYMENT.md
+PROJECT.md
+docker-compose.yml
+# Secrets and local env files
+.env
+.env.*
+**/.env
+**/.env.*
+# Dependencies / caches / virtualenvs
 backend/.venv/
-frontend/node_modules/
-.git/
-*.db
+.venv/
+**/node_modules/
 __pycache__/
+**/__pycache__/
 .pytest_cache/
+**/.pytest_cache/
+# Local data and logs
+*.db
+*.sqlite
+*.sqlite3
+**/*.log
+# Build/test tooling
+tests/
+backend/tests/
+scripts/
+backend/scripts/
+# VCS and CLI state
+.git/
 .vercel/
+frontend/.vercel/
+backend/.vercel/
+vcp_*
