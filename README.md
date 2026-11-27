@@ -43,7 +43,7 @@ pytest
 |---|---|---|
 | 1 | Skeleton, health API, auth (register/login/me), DB schema (6 tables), Supabase connected, deploy pipeline | ✅ done + deployed |
 | 2 | AI content engine + scheduling | ✅ core done: generate (mock/gemini), schedule, due-worker, settings personalization, Content+Settings UI |
-| 3 | Compliant lead capture (Meta Lead Ads, landing pages, property module) | 🚧 core done: landing pages `/l/<slug>` + consent-first capture + 18 business-type templates with per-industry landing extras + lead notes + search/filter + CSV export + manual platform-CSV import; Meta webhook pending dev account |
+| 3 | Compliant lead capture (Meta Lead Ads, landing pages, property module) | 🚧 core done: landing pages `/l/<slug>` + custom block pages `/p/<slug>` (P7 #1) + consent-first capture + 18 business-type templates with per-industry landing extras + lead notes + search/filter + CSV export + manual platform-CSV import; Meta webhook pending dev account |
 | 4 | WhatsApp chatbot + CRM funnel (Chatwoot + n8n) | not started |
 | 5 | Integration, pilot | not started |
 
@@ -51,7 +51,7 @@ pytest
 
 ## Live deployment (Vercel, free tier)
 
-- **Frontend:** https://lead-craft-ai.vercel.app (dashboard at `/`, public landing pages at `/l/<slug>`)
+- **Frontend:** https://lead-craft-ai.vercel.app (dashboard at `/`, public landing pages at `/l/<slug>` and custom block pages at `/p/<slug>`)
 - **API:** https://lead-craft-api.vercel.app (FastAPI on Vercel Functions, Python 3.12)
 - **DB:** Supabase Postgres (pooler); env vars live in Vercel project settings — never in the repo
 - Deploy: `powershell -ExecutionPolicy Bypass -File scripts_local/vercel_deploy.ps1 -Which backend|frontend` (requires `npx vercel@latest login` as a `lead-generators` team member; no token file)

@@ -12,8 +12,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.models import ClientSettings, LandingEvent, LandingVariant, User
+from app.models import ClientSettings, LandingEvent, LandingPage, LandingVariant, User
 from app.services import analytics, booking as booking_svc, business_types
+from app.services import pages as pages_svc
 
 router = APIRouter(prefix="/api/public")
 
@@ -98,6 +99,47 @@ class BookingBody(BaseModel):
     consent: bool
     # Honeypot: same silent reject as the capture form.
     company: str = Field(default="", max_length=200)
+
+
+@router.get("/pages/{slug}")
+def public_page_config(slug: str, db: Session = Depends(get_db)) -> dict:
+    """P7 #1: published custom page (block list) + public branding.
+
+    Drafts return 404 so unpublished work is never exposed. Only display
+    fields are returned - never contact data, never credentials.
+    """
+    page = db.scalar(
+        select(LandingPage).where(LandingPage.slug == slug, LandingPage.is_published)
+    )
+    if page is None:
+        raise HTTPException(status_code=404, detail="Unknown page.")
+    user = db.get(User, page.user_id)
+    row = db.scalar(select(ClientSettings).where(ClientSettings.user_id == page.user_id))
+    return {
+        "slug": page.slug,
+        "title": page.title,
+        "blocks": pages_svc.blocks_from_json(page.blocks_json),
+        "business": {
+            "name": user.business_name if user else "",
+            "brand_name": (row.brand_name if row else "") or "",
+            "logo_url": (row.logo_url if row else "") or "",
+            "primary_color": (row.primary_color if row else "") or "",
+            "support_email": (row.support_email if row else "") or "",
+            "footer_text": (row.footer_text if row else "") or "",
+            "hide_platform_brand": bool(row.hide_platform_brand) if row else False,
+            "niche": (row.niche if row else "") or "",
+            "target_area": (row.target_area if row else "") or "",
+        },
+        "capture": {
+            "page_slug": page.slug,
+            "business_slug": (row.landing_slug if row else "") or "",
+            "hint": "Consent is required. The platform never messages the lead automatically.",
+        },
+        "limits": {
+            "no_booking_widget": "Custom pages show the consent form only; booking stays on /l/<slug>.",
+            "no_html": "Block text is plain text - markup is never rendered.",
+        },
+    }
 
 
 @router.get("/landing/{slug}/slots")

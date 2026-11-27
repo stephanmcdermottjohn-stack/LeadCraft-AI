@@ -20,7 +20,7 @@ SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 # A viewer may still log in / read their own session.
 VIEWER_WRITE_EXEMPT = ("/api/auth",)
 # Business configuration an agent cannot change (operational writes stay open).
-AGENT_CONFIG_PREFIXES = ("/api/settings", "/api/landing-ab", "/api/campaign-spend", "/api/billing")
+AGENT_CONFIG_PREFIXES = ("/api/settings", "/api/landing-variants", "/api/pages", "/api/campaign-spend", "/api/billing")
 
 
 class RegisterBody(BaseModel):

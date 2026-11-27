@@ -29,7 +29,7 @@ Principle: **enhancement only** — every item below reuses the existing auth, t
 | D. Score vs Grade | 🟡 Partial | `leads.score` column exists (always 0, unused); no grade, history, weights |
 | E. Conversation inbox | 🟡 Skeleton | `conversations`/`messages` tables exist; no API, no UI |
 | F. Visitor intelligence | 🟡 Partial | Landing conversion tracking only (lead capture); no sessions/events analytics |
-| G. Landing/form builder | 🟡 Partial | One auto landing per business, 18 industry templates, consent+honeypot+thank-you; no custom pages, blocks, variants, A/B |
+| G. Landing/form builder | 🟡 Partial → improved | One auto landing per business, 18 industry templates, consent+honeypot+thank-you; A/B headline/CTA variants and **custom block pages** (`/p/<slug>`, P7 #1) now shipped; still no drag-and-drop editor |
 | H. Nurture engine | 🟡 Partial | Content scheduler infra reusable; no drip campaigns, no suppression list |
 | I. Voice/telephony | 🔴 Missing | P2 design-only (see cost section) |
 | J. Reputation/referral | 🔴 Missing | Nothing |
@@ -63,6 +63,8 @@ Principle: **enhancement only** — every item below reuses the existing auth, t
 
 ### P1 — Conversion & Engagement (next cycle)
 Landing-page/form builder (block-based, variants, A/B on headline/CTA/length reporting submissions + qualified leads), nurture workflows (consent-gated, suppression list, delivery metrics), unified inbox v1 (existing tables; WhatsApp/website-chat first), website analytics (first-party sessions/events, cookie-consent aware), funnel + campaign reports (distinguishing actual vs missing data).
+
+Shipped so far: **A/B variants** (P1 #1), **nurture v1** (P1 #2), **unified inbox v1** (P1 #3), **website analytics v1** (P1 #4), **funnel/campaign reports** (P1 #5), and **custom block pages** (P7 #1 — `/p/<slug>`, text-only blocks, consent-first capture, drafts hidden). Plan: `docs/p7-pages-plan.md`. A drag-and-drop builder, rich text and per-block A/B remain future work.
 
 ### P2 — Advanced Intelligence (design first, then approve)
 B2B visitor identification via a vetted provider (optional, off by default); voice module design (CallHippo-inspired) pending a telephony provider evaluation incl. Pakistan number/regulatory verification; review/referral workflows; advanced attribution.

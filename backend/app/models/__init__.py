@@ -309,6 +309,28 @@ class LandingEvent(Base):
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class LandingPage(Base):
+    """P7 #1: an owner-built public landing page (block list). Additive to the
+    template-driven /l/<slug> page: it never replaces the capture contract and
+    reuses POST /api/leads/capture with page_slug. Blocks are validated,
+    text-only JSON (see services/pages.py) - no HTML is ever stored."""
+
+    __tablename__ = "landing_pages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    # Public URL: /p/<slug>. Globally unique so a page URL never becomes
+    # ambiguous; drafts are still hidden from the public endpoint.
+    slug: Mapped[str] = mapped_column(String(60), unique=True)
+    title: Mapped[str] = mapped_column(String(200), default="")
+    blocks_json: Mapped[str] = mapped_column(Text, default="[]")
+    is_published: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 class NurtureCampaign(Base):
     """Consent-gated drip campaign (P1 #2). Steps are a simple script:
     [{day_offset: days after enrollment, message: the touch text}]. No

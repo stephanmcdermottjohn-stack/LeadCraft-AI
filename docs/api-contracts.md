@@ -46,7 +46,7 @@ Zero external cost and disabled by default: webhook endpoints answer **503** unt
 - `POST /api/leads/match` — area → registered dealers matching (Phase 3)
 
 ## Live (Phase 3 — landing page lead capture)
-- `POST /api/leads/capture` — the ONLY public lead-write endpoint. Requires `slug` (business landing page), `name`, `consent: true`, and at least one of phone/email. `consent_timestamp` is recorded SERVER-SIDE. Honeypot `company` field silently rejects bots (400). `source` is fixed to `landing_page`. Optional property fields (only when the business enables `show_property_fields`): `deal_type` (buy/rent/sell), `property_type`, `budget` — stored in `metadata_json`. 201 → `{lead: {id, status}}`.
+- `POST /api/leads/capture` — the ONLY public lead-write endpoint. Requires `name`, `consent: true`, at least one of phone/email, and either `slug` (business landing page) or `page_slug` (custom page, P7 #1; if both are sent they must be the same workspace). `consent_timestamp` is recorded SERVER-SIDE. Honeypot `company` field silently rejects bots (400). `source` is fixed to `landing_page`. Optional property fields (only when the business enables `show_property_fields`): `deal_type` (buy/rent/sell), `property_type`, `budget` — stored in `metadata_json`. 201 → `{lead: {id, status}}`.
 - `GET /api/public/landing/{slug}` — public, no-auth landing page config. Returns ONLY business display fields (business_name, niche, target_area, show_property_fields). Never personal data or other clients' rows. 404 for unknown slugs.
 - `GET /api/leads?q=&status=&source=` — auth. The owner's leads, newest first (max 200). Filters: `q` (ilike over name/phone/email/area/intent_notes), `status` ∈ {new, contacted, converted, archived}, `source` ∈ allowlist; invalid values → 400. Each row carries `source`, `consent_timestamp`, `status`, `metadata` (parsed dict).
 - `GET /api/leads/export.csv` — auth. Streaming CSV download (user-scoped, max 5000 rows). Columns: id, created_at, source, status, name, phone, email, area, deal_type, property_type, budget, intent_notes, consent_timestamp. `Content-Disposition: attachment; filename="leads-<date>.csv"`.
@@ -235,6 +235,18 @@ Zero external cost, no schema change, no fuzzy matching. Reads are available to 
   - Empty primary fields (name/phone/email/area/attribution/metadata…) are filled from duplicates and listed in `fields_filled`. Differing status/stage/source values are listed in `conflicts` (primary wins).
   - Duplicate lead rows are deleted only after their history has moved. One `duplicate_merged` activity is appended to the primary timeline, and one `lead.merged` audit row records ids/counts (no contact data).
   - Invalid input (primary also listed as duplicate, empty list, >10 duplicates) → `400`; another workspace's ids → `404`.
+
+## Live (P7 #1 — custom landing pages / block builder)
+Zero-cost, additive to `/l/<slug>`. Blocks are validated, **text-only** strings (no HTML is stored or rendered). Reads are available to every workspace member; writes are business configuration (owner/admin/manager; viewer and agent → `403`). All CRUD is workspace-scoped (another workspace's page → `404`); public slugs are globally unique.
+
+- `GET /api/pages` — `{pages[], limit: 20}`, newest-updated first. Each page: `{id, slug, title, blocks[], is_published, public_path: "/p/<slug>", updated_at}`.
+- `POST /api/pages` — `{slug, title, blocks: [], is_published?}` → `201 {page}`. Slug: 3–60 lowercase letters/digits/inner hyphens, not reserved (`api`, `admin`, `p`, `l`, …). Invalid slug/block → `400`; slug already used anywhere → `409`; over 20 pages → `400`.
+- `PATCH /api/pages/{id}` — partial `{slug?, title?, blocks?, is_published?}`; empty title → `400`; slug conflict → `409`.
+- `DELETE /api/pages/{id}` → `204`. Audit rows: `page.created` / `page.updated` / `page.deleted` store slug + counts only.
+- `GET /api/public/pages/{slug}` — **published only** (draft/unpublished → `404`). Returns `{slug, title, blocks[], business{branding/display fields}, capture{page_slug, business_slug, hint}, limits{no_booking_widget, no_html}}`. Never returns lead or account data.
+- Block caps: 12 blocks/page; `features` 1–6 items; `faq` 1–8 items; unknown block types/keys rejected or dropped; image URLs must be `https://` or rooted (`/…`).
+- `POST /api/leads/capture` — `slug` is optional when `page_slug` is supplied (at least one is required). A custom page resolves its workspace; if both are sent they must belong to the same workspace (`400` otherwise). The lead is stored with `source=landing_page` and `metadata.landing_page="<page slug>"`. Consent, honeypot and phone/email rules are unchanged.
+- Frontend: Settings → Custom landing pages (list/create/edit/publish/delete); public renderer at `/p/<slug>` with a compact consent form. Booking, A/B variants and property extras remain on `/l/<slug>`.
 
 ## Ground rules encoded in contracts (Section 0 of the roadmap)
 - Every lead write requires a `source` from the allowlist and a `consent_timestamp`.

@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 
 from app.api.auth import get_current_user
 from app.db import get_db
-from app.models import ClientSettings, Lead, LeadActivity, LeadNote, LeadStageHistory, User
+from app.models import ClientSettings, LandingPage, Lead, LeadActivity, LeadNote, LeadStageHistory, User
 from app.services.business_types import EXTRA_VALUE_MAX, extras_for
 from app.services.lifecycle import default_next_action, is_valid_stage
 
@@ -35,7 +35,10 @@ SLUG_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{1,98}[a-z0-9])?$")
 
 
 class LeadCaptureBody(BaseModel):
-    slug: str = Field(min_length=1, max_length=100)
+    # P7 #1: a custom page (/p/<slug>) can capture leads on its own, so slug is
+    # optional when page_slug is present. At least one of the two is required.
+    slug: str = Field(default="", max_length=100)
+    page_slug: str = Field(default="", max_length=60)
     name: str = Field(min_length=1, max_length=200)
     phone: str = Field(default="", max_length=50)
     email: str = Field(default="", max_length=320)
@@ -164,9 +167,40 @@ def capture(body: LeadCaptureBody, db: Session = Depends(get_db)) -> dict:
     if not body.phone.strip() and not body.email.strip():
         raise HTTPException(status_code=400, detail="Provide a phone number or an email so the business can reply.")
 
-    settings_row = db.scalar(select(ClientSettings).where(ClientSettings.landing_slug == body.slug))
-    if settings_row is None:
-        raise HTTPException(status_code=404, detail="Unknown business page.")
+    # Resolve the business: the template page /l/<slug>, a custom page
+    # /p/<page_slug> (P7 #1), or both when they belong to the same workspace.
+    page_row = None
+    if body.page_slug.strip():
+        page_row = db.scalar(
+            select(LandingPage).where(
+                LandingPage.slug == body.page_slug.strip().lower(),
+                LandingPage.is_published,
+            )
+        )
+        if page_row is None:
+            raise HTTPException(status_code=404, detail="Unknown page.")
+        settings_row = db.scalar(select(ClientSettings).where(ClientSettings.user_id == page_row.user_id))
+        if settings_row is None:
+            # Page owners always have a settings row; use defaults in memory so
+            # capture still works and nothing unexpected is committed here.
+            settings_row = ClientSettings(user_id=page_row.user_id)
+        if body.slug.strip():
+            by_slug = db.scalar(
+                select(ClientSettings).where(ClientSettings.landing_slug == body.slug.strip())
+            )
+            if by_slug is None or by_slug.user_id != page_row.user_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail="slug and page_slug must belong to the same workspace.",
+                )
+    else:
+        if not body.slug.strip():
+            raise HTTPException(status_code=400, detail="slug or page_slug is required.")
+        settings_row = db.scalar(
+            select(ClientSettings).where(ClientSettings.landing_slug == body.slug.strip())
+        )
+        if settings_row is None:
+            raise HTTPException(status_code=404, detail="Unknown business page.")
 
     # Referral link (P2 #1): link-based only, same business, never the new lead
     # itself (it has no id yet). Unknown codes are ignored silently.
@@ -188,6 +222,10 @@ def capture(body: LeadCaptureBody, db: Session = Depends(get_db)) -> dict:
     for k, v in (body.extra or {}).items():
         if settings_row.show_property_fields and k in allowed_keys and str(v).strip():
             metadata[k] = str(v).strip()[:EXTRA_VALUE_MAX]
+
+    # P7 #1: remember which custom page converted (plain slug, no PII).
+    if page_row is not None:
+        metadata["landing_page"] = page_row.slug
 
     lead = Lead(
         user_id=settings_row.user_id,

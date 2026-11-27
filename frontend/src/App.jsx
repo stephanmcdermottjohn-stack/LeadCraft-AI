@@ -594,6 +594,382 @@ function AbEditor() {
   );
 }
 
+const PAGE_BLOCK_DEFAULTS = {
+  hero: () => ({ type: "hero", heading: "", subheading: "", cta_label: "", image_url: "" }),
+  text: () => ({ type: "text", heading: "", body: "" }),
+  features: () => ({ type: "features", heading: "", items: [{ title: "", body: "" }] }),
+  testimonial: () => ({ type: "testimonial", quote: "", author: "", role: "" }),
+  faq: () => ({ type: "faq", heading: "", items: [{ question: "", answer: "" }] }),
+  cta: () => ({ type: "cta", heading: "", body: "", button_label: "" }),
+};
+const PAGE_BLOCK_LABELS = {
+  hero: "Hero",
+  text: "Text",
+  features: "Features",
+  testimonial: "Testimonial",
+  faq: "FAQ",
+  cta: "Call to action",
+};
+const PAGE_MAX_BLOCKS = 12;
+
+// P7 #1: custom landing pages built from validated, text-only blocks. The
+// public URL is /p/<slug>; lead capture reuses the same consent-first endpoint.
+function PagesEditor() {
+  const [pages, setPages] = useState([]);
+  const [limit, setLimit] = useState(20);
+  const [editing, setEditing] = useState(null); // null=list, {}=new, {id}=edit
+  const [error, setError] = useState("");
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const load = () => {
+    api("/api/pages")
+      .then((b) => {
+        setPages(b.pages);
+        setLimit(b.limit || 20);
+      })
+      .catch((err) => setError(err.message.replace(/^API \d+: /, "")));
+  };
+  useEffect(() => {
+    load();
+  }, []);
+
+  const fail = (err) => setError(err instanceof Error ? err.message.replace(/^API \d+: /, "") : "Request failed.");
+
+  const save = async () => {
+    setError("");
+    setMsg("");
+    setBusy(true);
+    try {
+      const body = JSON.stringify({
+        slug: editing.slug,
+        title: editing.title,
+        blocks: editing.blocks,
+        is_published: editing.is_published,
+      });
+      if (editing.id) {
+        await api(`/api/pages/${editing.id}`, { method: "PATCH", body });
+        setMsg("Page updated.");
+      } else {
+        await api("/api/pages", { method: "POST", body });
+        setMsg("Page created.");
+      }
+      setEditing(null);
+      load();
+    } catch (err) {
+      fail(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const togglePublish = async (page) => {
+    setError("");
+    setMsg("");
+    try {
+      await api(`/api/pages/${page.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ is_published: !page.is_published }),
+      });
+      load();
+    } catch (err) {
+      fail(err);
+    }
+  };
+
+  const remove = async (page) => {
+    if (!window.confirm(`Delete page "${page.title || page.slug}"? This cannot be undone.`)) return;
+    setError("");
+    setMsg("");
+    try {
+      await api(`/api/pages/${page.id}`, { method: "DELETE" });
+      setMsg("Page deleted.");
+      load();
+    } catch (err) {
+      fail(err);
+    }
+  };
+
+  // --- block editing helpers -------------------------------------------------
+  const setBlocks = (blocks) => setEditing((cur) => ({ ...cur, blocks }));
+  const patchBlock = (index, patch) =>
+    setBlocks(editing.blocks.map((b, i) => (i === index ? { ...b, ...patch } : b)));
+  const addBlock = (type) => {
+    if (editing.blocks.length >= PAGE_MAX_BLOCKS) {
+      setError(`A page supports at most ${PAGE_MAX_BLOCKS} blocks.`);
+      return;
+    }
+    setError("");
+    setBlocks([...editing.blocks, PAGE_BLOCK_DEFAULTS[type]()]);
+  };
+  const removeBlock = (index) => setBlocks(editing.blocks.filter((_, i) => i !== index));
+  const moveBlock = (index, delta) => {
+    const target = index + delta;
+    if (target < 0 || target >= editing.blocks.length) return;
+    const next = [...editing.blocks];
+    [next[index], next[target]] = [next[target], next[index]];
+    setBlocks(next);
+  };
+  const patchItem = (index, itemIndex, patch) =>
+    patchBlock(index, {
+      items: editing.blocks[index].items.map((item, j) => (j === itemIndex ? { ...item, ...patch } : item)),
+    });
+  const addItem = (index) => {
+    const block = editing.blocks[index];
+    const blank = block.type === "features" ? { title: "", body: "" } : { question: "", answer: "" };
+    patchBlock(index, { items: [...block.items, blank] });
+  };
+  const removeItem = (index, itemIndex) =>
+    patchBlock(index, { items: editing.blocks[index].items.filter((_, j) => j !== itemIndex) });
+
+  const line = (label, value, onChange, placeholder = "") => (
+    <label className="block text-xs text-slate-400">
+      {label}
+      <input
+        className="mt-1 w-full rounded-lg bg-slate-800 px-3 py-2 text-sm text-slate-100"
+        value={value ?? ""}
+        placeholder={placeholder}
+        onChange={(e) => onChange(e.target.value)}
+      />
+    </label>
+  );
+  const area = (label, value, onChange, rows = 3, placeholder = "") => (
+    <label className="block text-xs text-slate-400">
+      {label}
+      <textarea
+        className="mt-1 w-full rounded-lg bg-slate-800 px-3 py-2 text-sm text-slate-100"
+        rows={rows}
+        value={value ?? ""}
+        placeholder={placeholder}
+        onChange={(e) => onChange(e.target.value)}
+      />
+    </label>
+  );
+
+  const renderBlockEditor = (block, index) => (
+    <div key={index} className="rounded-lg border border-slate-800 bg-slate-950 p-3 space-y-2">
+      <div className="flex items-center gap-2">
+        <span className="text-xs font-semibold text-slate-300">
+          {index + 1}. {PAGE_BLOCK_LABELS[block.type] || block.type}
+        </span>
+        <div className="ml-auto flex gap-2 text-xs">
+          <button type="button" className="text-slate-400 hover:text-slate-200" onClick={() => moveBlock(index, -1)} disabled={index === 0}>
+            ↑
+          </button>
+          <button
+            type="button"
+            className="text-slate-400 hover:text-slate-200"
+            onClick={() => moveBlock(index, 1)}
+            disabled={index === editing.blocks.length - 1}
+          >
+            ↓
+          </button>
+          <button type="button" className="text-red-400 hover:text-red-300" onClick={() => removeBlock(index)}>
+            Remove
+          </button>
+        </div>
+      </div>
+      {block.type === "hero" && (
+        <>
+          {line("Heading", block.heading, (v) => patchBlock(index, { heading: v }), "Bridal season is open")}
+          {area("Subheading", block.subheading, (v) => patchBlock(index, { subheading: v }), 2)}
+          {line("Button label", block.cta_label, (v) => patchBlock(index, { cta_label: v }), "Get started")}
+          {line("Image URL (optional)", block.image_url, (v) => patchBlock(index, { image_url: v }), "https://…")}
+        </>
+      )}
+      {block.type === "text" && (
+        <>
+          {line("Heading (optional)", block.heading, (v) => patchBlock(index, { heading: v }))}
+          {area("Body", block.body, (v) => patchBlock(index, { body: v }), 4, "Plain text — line breaks are kept, HTML is not rendered.")}
+        </>
+      )}
+      {block.type === "features" && (
+        <>
+          {line("Heading (optional)", block.heading, (v) => patchBlock(index, { heading: v }))}
+          {block.items.map((item, j) => (
+            <div key={j} className="rounded border border-slate-800 p-2 space-y-2">
+              {line(`Feature ${j + 1} title`, item.title, (v) => patchItem(index, j, { title: v }))}
+              {area("Description", item.body, (v) => patchItem(index, j, { body: v }), 2)}
+              <button type="button" className="text-xs text-red-400" onClick={() => removeItem(index, j)}>
+                Remove feature
+              </button>
+            </div>
+          ))}
+          <button type="button" className="text-xs text-sky-400" onClick={() => addItem(index)} disabled={block.items.length >= 6}>
+            + Add feature (max 6)
+          </button>
+        </>
+      )}
+      {block.type === "testimonial" && (
+        <>
+          {area("Quote", block.quote, (v) => patchBlock(index, { quote: v }), 3)}
+          {line("Author", block.author, (v) => patchBlock(index, { author: v }))}
+          {line("Author role (optional)", block.role, (v) => patchBlock(index, { role: v }))}
+        </>
+      )}
+      {block.type === "faq" && (
+        <>
+          {line("Heading (optional)", block.heading, (v) => patchBlock(index, { heading: v }))}
+          {block.items.map((item, j) => (
+            <div key={j} className="rounded border border-slate-800 p-2 space-y-2">
+              {line(`Question ${j + 1}`, item.question, (v) => patchItem(index, j, { question: v }))}
+              {area("Answer", item.answer, (v) => patchItem(index, j, { answer: v }), 2)}
+              <button type="button" className="text-xs text-red-400" onClick={() => removeItem(index, j)}>
+                Remove question
+              </button>
+            </div>
+          ))}
+          <button type="button" className="text-xs text-sky-400" onClick={() => addItem(index)} disabled={block.items.length >= 8}>
+            + Add question (max 8)
+          </button>
+        </>
+      )}
+      {block.type === "cta" && (
+        <>
+          {line("Heading", block.heading, (v) => patchBlock(index, { heading: v }))}
+          {area("Body (optional)", block.body, (v) => patchBlock(index, { body: v }), 2)}
+          {line("Button label", block.button_label, (v) => patchBlock(index, { button_label: v }), "Request a callback")}
+        </>
+      )}
+    </div>
+  );
+
+  if (editing) {
+    return (
+      <div className="rounded-xl border border-slate-800 bg-slate-900 p-6 space-y-3 max-w-2xl">
+        <h3 className="font-semibold">{editing.id ? "Edit custom page" : "New custom page"}</h3>
+        <p className="text-xs text-slate-400">
+          Plain-text blocks on a public page at <code>/p/&lt;slug&gt;</code>. No HTML is rendered, and the form only
+          stores leads after explicit consent — the platform never messages them automatically.
+        </p>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {line("Slug (3–60 lowercase letters, digits, hyphens)", editing.slug, (v) => setEditing({ ...editing, slug: v }), "eid-bridal-offer")}
+          {line("Page title", editing.title, (v) => setEditing({ ...editing, title: v }), "Eid bridal offer")}
+        </div>
+        {editing.id && (
+          <p className="text-[11px] text-amber-400/80">
+            Renaming a published slug breaks old shared links — update them after saving.
+          </p>
+        )}
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={!!editing.is_published}
+            onChange={(e) => setEditing({ ...editing, is_published: e.target.checked })}
+          />
+          Published (visible at /p/{editing.slug || "<slug>"})
+        </label>
+
+        <div className="space-y-2">
+          {editing.blocks.map(renderBlockEditor)}
+          {editing.blocks.length === 0 && (
+            <p className="text-xs text-slate-500">No blocks yet — add a hero or a text block below.</p>
+          )}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {Object.keys(PAGE_BLOCK_LABELS).map((type) => (
+            <button
+              key={type}
+              type="button"
+              className="rounded bg-slate-800 px-2 py-1 text-xs hover:bg-slate-700"
+              onClick={() => addBlock(type)}
+              disabled={editing.blocks.length >= PAGE_MAX_BLOCKS}
+            >
+              + {PAGE_BLOCK_LABELS[type]}
+            </button>
+          ))}
+        </div>
+        <p className="text-[11px] text-slate-500">
+          {editing.blocks.length}/{PAGE_MAX_BLOCKS} blocks. Text only; unknown fields and HTML are rejected server-side.
+        </p>
+        {error && <p className="text-xs text-red-400">{error}</p>}
+        <div className="flex gap-2">
+          <button
+            className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold hover:bg-sky-500 disabled:opacity-60"
+            onClick={save}
+            disabled={busy}
+          >
+            {busy ? "Saving…" : "Save page"}
+          </button>
+          <button
+            className="rounded-lg bg-slate-800 px-4 py-2 text-sm hover:bg-slate-700"
+            onClick={() => {
+              setEditing(null);
+              setError("");
+            }}
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border border-slate-800 bg-slate-900 p-6 space-y-4 max-w-2xl">
+      <h3 className="font-semibold">Custom landing pages</h3>
+      <p className="text-xs text-slate-400">
+        Build extra pages from blocks (hero, text, features, testimonial, FAQ, call to action). Each page gets its own
+        public URL <code>/p/&lt;slug&gt;</code> and its own consent form. Drafts are invisible until published.
+      </p>
+      {error && <p className="text-xs text-red-400">{error}</p>}
+      {msg && <p className="text-xs text-emerald-400">{msg}</p>}
+      <ul className="space-y-2 text-sm">
+        {pages.map((page) => (
+          <li key={page.id} className="rounded-lg border border-slate-800 bg-slate-950 p-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-semibold">{page.title || page.slug}</span>
+              <span className="text-xs text-slate-500">/p/{page.slug}</span>
+              {page.is_published ? (
+                <span className="rounded bg-emerald-900/60 px-2 py-0.5 text-xs text-emerald-300">published</span>
+              ) : (
+                <span className="rounded bg-slate-800 px-2 py-0.5 text-xs text-slate-300">draft</span>
+              )}
+              <div className="ml-auto flex flex-wrap gap-2 text-xs">
+                {page.is_published && (
+                  <a className="text-sky-400 hover:text-sky-300" href={`/p/${page.slug}`} target="_blank" rel="noreferrer">
+                    View
+                  </a>
+                )}
+                <button className="text-sky-400 hover:text-sky-300" onClick={() => togglePublish(page)}>
+                  {page.is_published ? "Unpublish" : "Publish"}
+                </button>
+                <button
+                  className="text-sky-400 hover:text-sky-300"
+                  onClick={() => setEditing({ ...page, blocks: JSON.parse(JSON.stringify(page.blocks || [])) })}
+                >
+                  Edit
+                </button>
+                <button className="text-red-400 hover:text-red-300" onClick={() => remove(page)}>
+                  Delete
+                </button>
+              </div>
+            </div>
+            <p className="mt-1 text-[11px] text-slate-500">
+              {(page.blocks || []).length} block(s) · updated {page.updated_at ? new Date(page.updated_at).toLocaleString() : "—"}
+            </p>
+          </li>
+        ))}
+        {pages.length === 0 && <li className="text-sm text-slate-400">No custom pages yet.</li>}
+      </ul>
+      <button
+        className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold hover:bg-sky-500 disabled:opacity-60"
+        onClick={() => {
+          setError("");
+          setMsg("");
+          setEditing({ slug: "", title: "", is_published: false, blocks: [] });
+        }}
+        disabled={pages.length >= limit}
+      >
+        + New page
+      </button>
+      <p className="text-[11px] text-slate-500">
+        {pages.length}/{limit} pages. Agents and viewers cannot change pages (owner/admin/manager only).
+      </p>
+    </div>
+  );
+}
+
 function NurtureEditor() {
   const [campaigns, setCampaigns] = useState([]);
   const [editing, setEditing] = useState(null); // null=list, {id?, name, steps, active}
@@ -1556,10 +1932,279 @@ function SettingsPanel({ user, onLogout }) {
       <OpsCard />
       <IcpEditor />
       <AbEditor />
+      <PagesEditor />
       <NurtureEditor />
       <button className="text-sm text-red-400 hover:text-red-300" onClick={onLogout}>
         Log out
       </button>
+    </div>
+  );
+}
+
+// P7 #1: public renderer for an owner-built page (/p/<slug>). Blocks are plain
+// strings validated server-side; React escapes every value, so no markup is
+// ever interpreted. The capture form posts to the same consent-first endpoint
+// with page_slug.
+function BlockPage({ slug }) {
+  const [config, setConfig] = useState(null);
+  const [loadError, setLoadError] = useState("");
+  const [form, setForm] = useState({ name: "", phone: "", email: "", message: "" });
+  const [consent, setConsent] = useState(false);
+  const [company, setCompany] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+  const [formError, setFormError] = useState("");
+
+  // Same attribution contract as /l/<slug>: share-link params only.
+  const attribution = (() => {
+    const p = new URLSearchParams(window.location.search);
+    const get = (k) => (p.get(k) || "").slice(0, 200);
+    return {
+      campaign: get("campaign") || get("utm_campaign"),
+      utm_source: get("utm_source"),
+      utm_medium: get("utm_medium"),
+      utm_content: get("utm_content"),
+      utm_term: get("utm_term"),
+      referral_code: (p.get("ref") || "").slice(0, 32),
+    };
+  })();
+
+  useEffect(() => {
+    api(`/api/public/pages/${encodeURIComponent(slug)}`)
+      .then((cfg) => {
+        setConfig(cfg);
+        document.title = cfg.title || cfg.business?.name || "Landing page";
+      })
+      .catch((err) => setLoadError(err.message.replace(/^API \d+: /, "")));
+  }, [slug]);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setBusy(true);
+    setFormError("");
+    try {
+      await api("/api/leads/capture", {
+        method: "POST",
+        body: JSON.stringify({
+          page_slug: slug,
+          name: form.name,
+          phone: form.phone,
+          email: form.email,
+          intent_notes: form.message,
+          ...attribution,
+          company,
+          consent,
+        }),
+      });
+      setDone(true);
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message.replace(/^API \d+: /, "") : "Submission failed.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!config && !loadError) {
+    return <div className="min-h-screen flex items-center justify-center text-slate-400 text-sm">Loading…</div>;
+  }
+  if (!config) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4 text-center">
+        <div>
+          <h1 className="text-xl font-bold mb-2">Page not found</h1>
+          <p className="text-sm text-slate-400">{loadError || "This page does not exist or is not published yet."}</p>
+        </div>
+      </div>
+    );
+  }
+
+  const business = config.business || {};
+  const brand = business.brand_name || business.name || config.title;
+  const accent = /^#[0-9a-fA-F]{6}$/.test(business.primary_color || "") ? business.primary_color : "";
+  const footer = business.footer_text || (business.hide_platform_brand ? "" : "Powered by LeadCraft AI");
+  const goCapture = () => {
+    const el = document.getElementById("capture");
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+  const ctaButton = (label, full = false) =>
+    label ? (
+      <button
+        type="button"
+        onClick={goCapture}
+        className={`rounded-lg px-5 py-2 text-sm font-semibold text-white hover:opacity-90 ${full ? "w-full" : ""}`}
+        style={{ backgroundColor: accent || "#0284c7" }}
+      >
+        {label}
+      </button>
+    ) : null;
+
+  const renderBlock = (block, index) => {
+    switch (block.type) {
+      case "hero":
+        return (
+          <section key={index} className="space-y-4 py-10 text-center">
+            {block.image_url && (
+              <img src={block.image_url} alt="" className="mx-auto max-h-64 rounded-xl object-cover" />
+            )}
+            <h1 className="text-3xl sm:text-4xl font-bold tracking-tight">{block.heading}</h1>
+            {block.subheading && <p className="mx-auto max-w-2xl text-base text-slate-300 whitespace-pre-line">{block.subheading}</p>}
+            {ctaButton(block.cta_label || "Get in touch")}
+          </section>
+        );
+      case "text":
+        return (
+          <section key={index} className="space-y-2 py-4">
+            {block.heading && <h2 className="text-2xl font-bold">{block.heading}</h2>}
+            <p className="text-sm leading-6 text-slate-300 whitespace-pre-line">{block.body}</p>
+          </section>
+        );
+      case "features":
+        return (
+          <section key={index} className="space-y-4 py-4">
+            {block.heading && <h2 className="text-2xl font-bold">{block.heading}</h2>}
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {block.items.map((item, j) => (
+                <div key={j} className="rounded-xl border border-slate-800 bg-slate-900 p-4">
+                  <h3 className="font-semibold">{item.title}</h3>
+                  {item.body && <p className="mt-1 text-sm text-slate-400 whitespace-pre-line">{item.body}</p>}
+                </div>
+              ))}
+            </div>
+          </section>
+        );
+      case "testimonial":
+        return (
+          <section key={index} className="py-4">
+            <blockquote className="rounded-xl border border-slate-800 bg-slate-900 p-5">
+              <p className="text-base italic text-slate-200 whitespace-pre-line">“{block.quote}”</p>
+              <footer className="mt-3 text-sm text-slate-400">
+                — {block.author}
+                {block.role ? `, ${block.role}` : ""}
+              </footer>
+            </blockquote>
+          </section>
+        );
+      case "faq":
+        return (
+          <section key={index} className="space-y-3 py-4">
+            {block.heading && <h2 className="text-2xl font-bold">{block.heading}</h2>}
+            {block.items.map((item, j) => (
+              <details key={j} className="rounded-xl border border-slate-800 bg-slate-900 p-4">
+                <summary className="cursor-pointer text-sm font-semibold">{item.question}</summary>
+                <p className="mt-2 text-sm text-slate-400 whitespace-pre-line">{item.answer}</p>
+              </details>
+            ))}
+          </section>
+        );
+      case "cta":
+        return (
+          <section key={index} className="my-6 rounded-xl border border-slate-800 bg-slate-900 p-6 text-center space-y-3">
+            <h2 className="text-2xl font-bold">{block.heading}</h2>
+            {block.body && <p className="text-sm text-slate-300 whitespace-pre-line">{block.body}</p>}
+            {ctaButton(block.button_label || "Request a callback")}
+          </section>
+        );
+      default:
+        return null;
+    }
+  };
+
+  const field = (key, label, placeholder, type = "text", required = false) => (
+    <label className="block text-sm">
+      {label}
+      <input
+        className="mt-1 block w-full rounded-lg bg-slate-800 px-3 py-2"
+        type={type}
+        placeholder={placeholder}
+        value={form[key]}
+        onChange={(e) => setForm({ ...form, [key]: e.target.value })}
+        required={required}
+      />
+    </label>
+  );
+
+  return (
+    <div className="min-h-screen bg-slate-950 text-slate-100">
+      <div className="mx-auto max-w-3xl px-4 pb-12">
+        <header className="flex items-center justify-between gap-3 py-4">
+          <span className="text-sm font-semibold">{brand}</span>
+          {business.support_email && (
+            <a className="text-xs text-slate-400 underline" href={`mailto:${business.support_email}`}>
+              {business.support_email}
+            </a>
+          )}
+        </header>
+        {Array.isArray(config.blocks) && config.blocks.map(renderBlock)}
+
+        <section id="capture" className="mt-8 rounded-2xl border border-slate-800 bg-slate-900 p-6 space-y-3">
+          {done ? (
+            <div className="space-y-2 py-6 text-center">
+              <div className="text-4xl">✅</div>
+              <h2 className="text-xl font-bold">Thank you, {form.name.split(" ")[0]}!</h2>
+              <p className="text-sm text-slate-400">{brand} has received your request and will reach out soon.</p>
+            </div>
+          ) : (
+            <>
+              <h2 className="text-xl font-bold">Get in touch</h2>
+              <p className="text-sm text-slate-400">
+                Leave your details and {brand} will contact you. The platform does not send automated messages.
+              </p>
+              <form onSubmit={submit} className="space-y-3">
+                {field("name", "Your name", "Ayesha Khan", "text", true)}
+                {field("phone", "Phone", "0300 1234567")}
+                {field("email", "Email (optional)", "you@example.com", "email")}
+                <label className="block text-sm">
+                  Anything we should know? (optional)
+                  <textarea
+                    className="mt-1 block w-full rounded-lg bg-slate-800 px-3 py-2"
+                    rows={2}
+                    value={form.message}
+                    onChange={(e) => setForm({ ...form, message: e.target.value })}
+                  />
+                </label>
+                <input
+                  aria-hidden="true"
+                  tabIndex={-1}
+                  autoComplete="off"
+                  className="absolute opacity-0 h-0 w-0"
+                  placeholder="Company"
+                  value={company}
+                  onChange={(e) => setCompany(e.target.value)}
+                />
+                <label className="flex items-start gap-2 text-xs text-slate-300">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={consent}
+                    onChange={(e) => setConsent(e.target.checked)}
+                    required
+                  />
+                  <span>I agree to be contacted about my enquiry. My details are stored so {brand} can reply.</span>
+                </label>
+                {formError && <p className="text-xs text-red-400">{formError}</p>}
+                <button
+                  type="submit"
+                  className="w-full rounded-lg px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-60"
+                  style={{ backgroundColor: accent || "#0284c7" }}
+                  disabled={busy}
+                >
+                  {busy ? "Sending…" : "Request a callback"}
+                </button>
+                <p className="text-[10px] text-slate-500">
+                  Provide a phone number or email so the business can reply. Consent is recorded server-side.
+                </p>
+              </form>
+            </>
+          )}
+        </section>
+
+        {(footer || business.support_email) && (
+          <footer className="mt-8 space-y-1 text-center text-xs text-slate-500">
+            {footer && <p>{footer}</p>}
+            {business.support_email && <p>{business.support_email}</p>}
+          </footer>
+        )}
+      </div>
     </div>
   );
 }
@@ -4498,6 +5143,9 @@ function AdminPanel() {
 }
 
 export default function App() {
+  // P7 #1: custom block pages live at /p/<slug>, also public and auth-free.
+  const pageMatch = /^\/p\/([a-z0-9-]+)\/?$/.exec(window.location.pathname);
+  if (pageMatch) return <BlockPage slug={pageMatch[1]} />;
   // Public landing pages live at /l/<slug> — render them with no dashboard,
   // no auth state, and no dashboard data in the bundle path.
   const landingMatch = /^\/l\/([a-z0-9-]+)\/?$/.exec(window.location.pathname);
