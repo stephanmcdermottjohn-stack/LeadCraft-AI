@@ -7,7 +7,11 @@ param(
     [ValidateSet("backend", "frontend")]
     [string]$Which
 )
-$ErrorActionPreference = "Stop"
+# Native CLIs (npx/vercel) write progress and info to stderr. Under Windows
+# PowerShell 5.1, `2>&1` turns that into an ErrorRecord, so "Stop" would abort a
+# perfectly healthy call (e.g. `vercel teams ls`). Keep Continue and rely on the
+# explicit $LASTEXITCODE checks below.
+$ErrorActionPreference = "Continue"
 $root = Split-Path -Parent $PSScriptRoot
 $scope = "lead-generators"
 
