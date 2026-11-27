@@ -612,6 +612,16 @@ const PAGE_BLOCK_LABELS = {
 };
 const PAGE_MAX_BLOCKS = 12;
 
+// Brand names are text. If a URL was pasted into the brand-name field, never
+// print that raw URL into headings or consent copy — fall back to the real
+// business name. (The logo belongs in logo_url and is rendered as an image.)
+function displayBrandName(brandName, businessName = "", fallback = "") {
+  const text = String(brandName || "").trim();
+  const looksLikeUrl = /^(https?:\/\/|\/\/|\/)/i.test(text) || text.includes("://");
+  const chosen = !text || looksLikeUrl ? String(businessName || "").trim() : text;
+  return chosen || fallback;
+}
+
 // P7 #1: custom landing pages built from validated, text-only blocks. The
 // public URL is /p/<slug>; lead capture reuses the same consent-first endpoint.
 function PagesEditor() {
@@ -1885,7 +1895,12 @@ function SettingsPanel({ user, onLogout }) {
           Presentation only — no custom domain, no plan enforcement. Applies to your dashboard header and public
           landing page.
         </p>
-        {field("brand_name", "Brand name (shown instead of your business name)")}
+        {field("brand_name", "Brand name (plain text — use Logo URL below for the image)")}
+        {/^(https?:\/\/|\/\/|\/)/i.test((settings.brand_name || "").trim()) && (
+          <p className="text-xs text-amber-400">
+            This looks like a URL. Brand name is text; paste the image link into Logo URL instead.
+          </p>
+        )}
         {field("logo_url", "Logo URL (https://… or /path)")}
         <div className="space-y-1">
           <label className="block text-sm">
@@ -2019,7 +2034,7 @@ function BlockPage({ slug }) {
   }
 
   const business = config.business || {};
-  const brand = business.brand_name || business.name || config.title;
+  const brand = displayBrandName(business.brand_name, business.name, config.title || "this business");
   const accent = /^#[0-9a-fA-F]{6}$/.test(business.primary_color || "") ? business.primary_color : "";
   const footer = business.footer_text || (business.hide_platform_brand ? "" : "Powered by LeadCraft AI");
   const goCapture = () => {
@@ -2127,7 +2142,12 @@ function BlockPage({ slug }) {
     <div className="min-h-screen bg-slate-950 text-slate-100">
       <div className="mx-auto max-w-3xl px-4 pb-12">
         <header className="flex items-center justify-between gap-3 py-4">
-          <span className="text-sm font-semibold">{brand}</span>
+          <div className="flex items-center gap-2">
+            {business.logo_url && (
+              <img src={business.logo_url} alt={brand} className="h-8 w-auto max-w-[10rem] rounded object-contain" />
+            )}
+            <span className="text-sm font-semibold">{brand}</span>
+          </div>
           {business.support_email && (
             <a className="text-xs text-slate-400 underline" href={`mailto:${business.support_email}`}>
               {business.support_email}
@@ -2404,7 +2424,7 @@ function LandingPage({ slug }) {
     </label>
   );
 
-  const brand = config.brand_name || config.business_name;
+  const brand = displayBrandName(config.brand_name, config.business_name);
   const accent = /^#[0-9a-fA-F]{6}$/.test(config.primary_color || "") ? config.primary_color : "";
   const footer = config.footer_text || (config.hide_platform_brand ? "" : "Powered by LeadCraft AI");
 
@@ -5168,7 +5188,8 @@ function DashboardApp() {
 
   if (!user) return <AuthScreen onAuthed={setUser} />;
 
-  const brandName = brand?.brand_name || (brand?.hide_platform_brand ? user.business_name : "LeadCraft AI");
+  const brandText = displayBrandName(brand?.brand_name, "");
+  const brandName = brandText || (brand?.hide_platform_brand ? user.business_name : "LeadCraft AI");
   const tagline = brand?.hide_platform_brand ? user.business_name : "AI content · compliant leads · CRM";
 
   const navItems = user.is_admin ? [...NAV_ITEMS, "Admin"] : NAV_ITEMS;
