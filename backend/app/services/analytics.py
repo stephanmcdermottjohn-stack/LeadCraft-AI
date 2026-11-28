@@ -72,15 +72,28 @@ def _rate(numerator: int, denominator: int) -> float | None:
     return round(numerator / denominator * 100, 1)
 
 
-def summary(db: Session, user_id: int, days: int = 30) -> dict:
+def summary(
+    db: Session,
+    user_id: int,
+    days: int = 30,
+    path: str | None = None,
+    landing_page: str | None = None,
+) -> dict:
+    """Workspace analytics, optionally narrowed to one custom page.
+
+    ``path`` filters raw events (e.g. "/p/eid-offer"); ``landing_page`` filters
+    captured leads by their ``landing_page_slug``. Passing neither keeps the
+    original workspace-wide behaviour.
+    """
     days = max(1, min(365, int(days)))
     now = datetime.datetime.now(datetime.timezone.utc)
     since = now - datetime.timedelta(days=days)
-    rows = db.scalars(
-        select(AnalyticsEvent).where(
-            AnalyticsEvent.user_id == user_id, AnalyticsEvent.created_at >= since
-        )
-    ).all()
+    stmt = select(AnalyticsEvent).where(
+        AnalyticsEvent.user_id == user_id, AnalyticsEvent.created_at >= since
+    )
+    if path:
+        stmt = stmt.where(AnalyticsEvent.path == path)
+    rows = db.scalars(stmt).all()
 
     sessions_all = {r.session_id for r in rows}
     per_event_sessions = {
@@ -92,11 +105,10 @@ def summary(db: Session, user_id: int, days: int = 30) -> dict:
     starts = len(per_event_sessions["form_start"])
     submits = len(per_event_sessions["submit"])
 
-    leads_captured_count = len(
-        db.scalars(
-            select(Lead.id).where(Lead.user_id == user_id, Lead.created_at >= since)
-        ).all()
-    )
+    lead_stmt = select(Lead.id).where(Lead.user_id == user_id, Lead.created_at >= since)
+    if landing_page is not None:
+        lead_stmt = lead_stmt.where(Lead.landing_page_slug == landing_page)
+    leads_captured_count = len(db.scalars(lead_stmt).all())
 
     notes = []
     if not rows:

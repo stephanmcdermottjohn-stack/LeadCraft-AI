@@ -631,6 +631,9 @@ function PagesEditor() {
   const [error, setError] = useState("");
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
+  // P7 #2: per-page analytics (loaded on demand, cached per page id).
+  const [openStats, setOpenStats] = useState(null);
+  const [statsById, setStatsById] = useState({});
 
   const load = () => {
     api("/api/pages")
@@ -695,6 +698,21 @@ function PagesEditor() {
       await api(`/api/pages/${page.id}`, { method: "DELETE" });
       setMsg("Page deleted.");
       load();
+    } catch (err) {
+      fail(err);
+    }
+  };
+
+  const toggleStats = async (page) => {
+    if (openStats === page.id) {
+      setOpenStats(null);
+      return;
+    }
+    setOpenStats(page.id);
+    if (statsById[page.id]) return;
+    try {
+      const data = await api(`/api/pages/${page.id}/analytics`);
+      setStatsById((cur) => ({ ...cur, [page.id]: data }));
     } catch (err) {
       fail(err);
     }
@@ -858,7 +876,8 @@ function PagesEditor() {
         </div>
         {editing.id && (
           <p className="text-[11px] text-amber-400/80">
-            Renaming a published slug breaks old shared links — update them after saving.
+            Renaming a published slug breaks old shared links, and past analytics/leads stay attached to the old slug
+            (history is never rewritten).
           </p>
         )}
         <label className="flex items-center gap-2 text-sm">
@@ -944,6 +963,9 @@ function PagesEditor() {
                 <button className="text-sky-400 hover:text-sky-300" onClick={() => togglePublish(page)}>
                   {page.is_published ? "Unpublish" : "Publish"}
                 </button>
+                <button className="text-sky-400 hover:text-sky-300" onClick={() => toggleStats(page)}>
+                  {openStats === page.id ? "Hide stats" : "Stats"}
+                </button>
                 <button
                   className="text-sky-400 hover:text-sky-300"
                   onClick={() => setEditing({ ...page, blocks: JSON.parse(JSON.stringify(page.blocks || [])) })}
@@ -958,6 +980,51 @@ function PagesEditor() {
             <p className="mt-1 text-[11px] text-slate-500">
               {(page.blocks || []).length} block(s) · updated {page.updated_at ? new Date(page.updated_at).toLocaleString() : "—"}
             </p>
+            {page.stats && (
+              <p className="mt-1 text-[11px] text-slate-400">
+                {page.stats.views} views · {page.stats.leads} leads ({page.stats.window_days}d)
+                {page.stats.conversion_pct !== null && (
+                  <> · {page.stats.conversion_pct}% conversion{page.stats.conversion_known ? "" : " (too early)"}</>
+                )}
+              </p>
+            )}
+            {openStats === page.id && (
+              <div className="mt-2 rounded border border-slate-800 p-2 text-xs text-slate-400">
+                {!statsById[page.id] ? (
+                  <p>Loading…</p>
+                ) : (
+                  <>
+                    <p className="text-slate-300">
+                      Last {statsById[page.id].window_days} days: {statsById[page.id].funnel.page_view_sessions} visitors ·{" "}
+                      {statsById[page.id].funnel.form_start_sessions} started the form ·{" "}
+                      {statsById[page.id].leads_captured} leads
+                    </p>
+                    <p className="mt-1 text-[10px] text-slate-500">
+                      {statsById[page.id].rates_known
+                        ? `Submit rate ${statsById[page.id].submit_rate_pct}% (form starts → submits).`
+                        : "Too early to judge rates — needs 30 sessions. Counts are real, rates are not estimated."}
+                    </p>
+                    <table className="mt-1 w-full text-[10px]">
+                      <thead>
+                        <tr className="text-left text-slate-500">
+                          <th>Day</th><th>Views</th><th>Starts</th><th>Submits</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {statsById[page.id].daily.slice(-7).map((d) => (
+                          <tr key={d.date}>
+                            <td>{d.date.slice(5)}</td><td>{d.page_view}</td><td>{d.form_start}</td><td>{d.submit}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {statsById[page.id].notes.map((note, i) => (
+                      <p key={i} className="mt-1 text-[10px] text-slate-500">{note}</p>
+                    ))}
+                  </>
+                )}
+              </div>
+            )}
           </li>
         ))}
         {pages.length === 0 && <li className="text-sm text-slate-400">No custom pages yet.</li>}
@@ -1969,6 +2036,30 @@ function BlockPage({ slug }) {
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
   const [formError, setFormError] = useState("");
+  // P7 #2: first-party, cookie-free analytics for this custom page.
+  const [formStarted, setFormStarted] = useState(false);
+
+  const track = (eventName) => {
+    try {
+      let sid = sessionStorage.getItem("lc_sid") || "";
+      if (!sid) {
+        sid = (typeof crypto !== "undefined" && crypto.randomUUID
+          ? crypto.randomUUID()
+          : `${Date.now()}${Math.random().toString(36).slice(2)}`
+        )
+          .replace(/[^A-Za-z0-9_-]/g, "")
+          .slice(0, 64);
+        sessionStorage.setItem("lc_sid", sid);
+      }
+      // The server forces path=/p/<slug>; only the event and host are used.
+      api(`/api/public/pages/${encodeURIComponent(slug)}/events`, {
+        method: "POST",
+        body: JSON.stringify({ session_id: sid, event: eventName, referrer: document.referrer || "" }),
+      }).catch(() => {});
+    } catch {
+      /* private mode: analytics just isn't recorded */
+    }
+  };
 
   // Same attribution contract as /l/<slug>: share-link params only.
   const attribution = (() => {
@@ -1989,6 +2080,7 @@ function BlockPage({ slug }) {
       .then((cfg) => {
         setConfig(cfg);
         document.title = cfg.title || cfg.business?.name || "Landing page";
+        track("page_view");
       })
       .catch((err) => setLoadError(err.message.replace(/^API \d+: /, "")));
   }, [slug]);
@@ -2012,6 +2104,7 @@ function BlockPage({ slug }) {
         }),
       });
       setDone(true);
+      track("submit");
     } catch (err) {
       setFormError(err instanceof Error ? err.message.replace(/^API \d+: /, "") : "Submission failed.");
     } finally {
@@ -2169,7 +2262,16 @@ function BlockPage({ slug }) {
               <p className="text-sm text-slate-400">
                 Leave your details and {brand} will contact you. The platform does not send automated messages.
               </p>
-              <form onSubmit={submit} className="space-y-3">
+              <form
+                onSubmit={submit}
+                className="space-y-3"
+                onFocus={() => {
+                  if (!formStarted) {
+                    setFormStarted(true);
+                    track("form_start");
+                  }
+                }}
+              >
                 {field("name", "Your name", "Ayesha Khan", "text", true)}
                 {field("phone", "Phone", "0300 1234567")}
                 {field("email", "Email (optional)", "you@example.com", "email")}
@@ -2942,6 +3044,9 @@ function LeadsPanel() {
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [sourceFilter, setSourceFilter] = useState("");
+  // P7 #2: per-page lead filter (custom pages only).
+  const [pageFilter, setPageFilter] = useState("");
+  const [pages, setPages] = useState([]);
   const [openNotes, setOpenNotes] = useState(null); // lead id
   const [notes, setNotes] = useState({});
   const [noteDraft, setNoteDraft] = useState("");
@@ -2975,13 +3080,17 @@ function LeadsPanel() {
         if (def) setDefaultIcpId(def.id);
       })
       .catch(() => {});
+    // P7 #2: custom pages for the per-page lead filter.
+    api("/api/pages")
+      .then((b) => setPages(b.pages || []))
+      .catch(() => {});
   }, []);
 
   // Debounced re-fetch on filter changes
   useEffect(() => {
-    const t = setTimeout(() => loadLeads({ q, status: statusFilter, source: sourceFilter }), 300);
+    const t = setTimeout(() => loadLeads({ q, status: statusFilter, source: sourceFilter, page: pageFilter }), 300);
     return () => clearTimeout(t);
-  }, [q, statusFilter, sourceFilter]);
+  }, [q, statusFilter, sourceFilter, pageFilter]);
 
   const setStatus = async (id, status) => {
     try {
@@ -3390,7 +3499,7 @@ function LeadsPanel() {
   return (
     <div className="space-y-4 max-w-2xl">
       {error && <p className="text-xs text-red-400">{error}</p>}
-      <DuplicateLeadsPanel onMerged={() => loadLeads({ q, status: statusFilter, source: sourceFilter })} />
+      <DuplicateLeadsPanel onMerged={() => loadLeads({ q, status: statusFilter, source: sourceFilter, page: pageFilter })} />
       <div className="flex flex-wrap gap-2 items-center">
         <input
           className="flex-1 min-w-40 rounded-lg bg-slate-800 px-3 py-2 text-sm"
@@ -3408,6 +3517,14 @@ function LeadsPanel() {
           <option value="">All sources</option>
           {SOURCES.map((s) => (
             <option key={s}>{s}</option>
+          ))}
+        </select>
+        <select className="rounded-lg bg-slate-800 px-2 py-2 text-sm" value={pageFilter} onChange={(e) => setPageFilter(e.target.value)}>
+          <option value="">All custom pages</option>
+          {pages.map((p) => (
+            <option key={p.id} value={p.slug}>
+              {p.title || p.slug}
+            </option>
           ))}
         </select>
         <button className="rounded-lg bg-slate-800 px-3 py-2 text-sm hover:bg-slate-700" onClick={() => { setShowImport(!showImport); setImportMsg(""); }}>
@@ -3455,6 +3572,9 @@ function LeadsPanel() {
             <li key={l.id} className="rounded-lg border border-slate-800 bg-slate-950 p-4 text-sm">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="rounded bg-sky-900 px-2 py-0.5 text-xs">{l.source}</span>
+                {l.landing_page_slug && (
+                  <span className="rounded bg-indigo-900 px-2 py-0.5 text-xs">/p/{l.landing_page_slug}</span>
+                )}
                 <span className="rounded bg-slate-800 px-2 py-0.5 text-xs">{l.status}</span>
                 <select
                   className="rounded bg-indigo-900 px-2 py-1 text-xs"

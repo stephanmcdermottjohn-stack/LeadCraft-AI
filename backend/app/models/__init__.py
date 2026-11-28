@@ -143,6 +143,9 @@ class Lead(Base):
     utm_content: Mapped[str] = mapped_column(String(200), default="")
     utm_term: Mapped[str] = mapped_column(String(200), default="")
     landing_variant: Mapped[str] = mapped_column(String(50), default="")
+    # P7 #2: which custom page (/p/<slug>) captured this lead. Null means the
+    # template landing page, an import or any other source. Plain slug, no PII.
+    landing_page_slug: Mapped[str | None] = mapped_column(String(60), nullable=True, index=True)
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     # --- Referrals (P2 #1) -----------------------------------------------------
     # Random, per-business share code; a lead captured with ?ref=<code> is

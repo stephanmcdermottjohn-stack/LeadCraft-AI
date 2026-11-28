@@ -142,6 +142,26 @@ def public_page_config(slug: str, db: Session = Depends(get_db)) -> dict:
     }
 
 
+@router.post("/pages/{slug}/events", status_code=204)
+def log_page_analytics_event(slug: str, body: dict | None = None, db: Session = Depends(get_db)) -> None:
+    """P7 #2: first-party events for a custom page (page_view/form_start/submit).
+
+    Unknown or unpublished pages are silently ignored (204), so the endpoint
+    cannot be used to probe drafts. The stored path is forced to
+    ``/p/<slug>`` rather than trusting the client, so custom-page traffic can
+    never pollute the template landing page's numbers.
+    """
+    page = db.scalar(
+        select(LandingPage).where(LandingPage.slug == slug, LandingPage.is_published)
+    )
+    if page is None or not isinstance(body, dict):
+        return
+    payload = dict(body)
+    payload["path"] = f"/p/{page.slug}"
+    if analytics.record_event(db, page.user_id, page.slug, payload):
+        db.commit()
+
+
 @router.get("/landing/{slug}/slots")
 def booking_slots(slug: str, date: str = "", db: Session = Depends(get_db)) -> dict:
     row = db.scalar(select(ClientSettings).where(ClientSettings.landing_slug == slug))

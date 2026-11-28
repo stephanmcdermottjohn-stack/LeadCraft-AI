@@ -248,6 +248,16 @@ Zero-cost, additive to `/l/<slug>`. Blocks are validated, **text-only** strings 
 - `POST /api/leads/capture` — `slug` is optional when `page_slug` is supplied (at least one is required). A custom page resolves its workspace; if both are sent they must belong to the same workspace (`400` otherwise). The lead is stored with `source=landing_page` and `metadata.landing_page="<page slug>"`. Consent, honeypot and phone/email rules are unchanged.
 - Frontend: Settings → Custom landing pages (list/create/edit/publish/delete); public renderer at `/p/<slug>` with a compact consent form. Booking, A/B variants and property extras remain on `/l/<slug>`.
 
+## Live (P7 #2 — custom page analytics & per-page leads)
+Additive to P7 #1. First-party, cookie-free events only (no IPs, no user agents, no full referrers). All reads are workspace-scoped; anonymous event writes never reveal whether a draft exists.
+
+- `POST /api/public/pages/{slug}/events` — `{session_id, event: page_view|form_start|submit, referrer?}`. **Published pages only**, silent `204` for unknown/draft pages and malformed payloads. The stored path is forced server-side to `/p/<slug>`, so spoofed `path` values cannot pollute template-page analytics.
+- `GET /api/pages` — each page now carries `stats: {window_days: 30, views, leads, conversion_pct, conversion_known}` plus top-level `stats_window_days`. Counts are grouped queries (no per-page N+1). `conversion_pct` is the raw ratio (or `null` with zero views); `conversion_known` is `false` below 30 views (honest "too early").
+- `GET /api/pages/{id}/analytics?days=1..365` — same first-party summary shape as `/api/analytics/summary` but filtered to `/p/<slug>` events and leads with `landing_page_slug == slug`, plus `page {id, slug, title}`. Another workspace's page → `404`.
+- `GET /api/leads?page=<slug>` — narrows leads to one custom page; invalid/unknown slugs simply return an empty list. Every lead payload now includes `landing_page_slug` (`null` for template-page captures, imports, WhatsApp, etc.). CSV export includes the column and the badge is shown in the Leads list.
+- Capture: a lead created through `page_slug` stores the plain slug on `Lead.landing_page_slug` (the JSON metadata copy remains for backwards compatibility).
+- Migration: new column/index only — run `python scripts/add_page_lead_source.py` from `backend/` **before** deploying the backend that reads it (a new column is not created by `create_all`).
+
 ## Ground rules encoded in contracts (Section 0 of the roadmap)
 - Every lead write requires a `source` from the allowlist and a `consent_timestamp`.
 - No endpoint creates outbound-first contact. `messages.direction=in` rows must exist before the bot replies.

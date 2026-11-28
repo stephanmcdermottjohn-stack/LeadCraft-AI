@@ -64,7 +64,7 @@ Principle: **enhancement only** — every item below reuses the existing auth, t
 ### P1 — Conversion & Engagement (next cycle)
 Landing-page/form builder (block-based, variants, A/B on headline/CTA/length reporting submissions + qualified leads), nurture workflows (consent-gated, suppression list, delivery metrics), unified inbox v1 (existing tables; WhatsApp/website-chat first), website analytics (first-party sessions/events, cookie-consent aware), funnel + campaign reports (distinguishing actual vs missing data).
 
-Shipped so far: **A/B variants** (P1 #1), **nurture v1** (P1 #2), **unified inbox v1** (P1 #3), **website analytics v1** (P1 #4), **funnel/campaign reports** (P1 #5), and **custom block pages** (P7 #1 — `/p/<slug>`, text-only blocks, consent-first capture, drafts hidden). Plan: `docs/p7-pages-plan.md`. A drag-and-drop builder, rich text and per-block A/B remain future work.
+Shipped so far: **A/B variants** (P1 #1), **nurture v1** (P1 #2), **unified inbox v1** (P1 #3), **website analytics v1** (P1 #4), **funnel/campaign reports** (P1 #5), **custom block pages** (P7 #1 — `/p/<slug>`, text-only blocks, consent-first capture, drafts hidden) and **custom page analytics + per-page leads** (P7 #2 — cookie-free views/starts/submits, `leads.landing_page_slug`, page filter and CSV column). Plan: `docs/p7-pages-plan.md`. A drag-and-drop builder, rich text and per-block A/B remain future work.
 
 ### P2 — Advanced Intelligence (design first, then approve)
 B2B visitor identification via a vetted provider (optional, off by default); voice module design (CallHippo-inspired) pending a telephony provider evaluation incl. Pakistan number/regulatory verification; review/referral workflows; advanced attribution.

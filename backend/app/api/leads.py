@@ -143,6 +143,7 @@ def _public_lead(lead: Lead) -> dict:
         "utm_content": lead.utm_content,
         "utm_term": lead.utm_term,
         "landing_variant": lead.landing_variant,
+        "landing_page_slug": lead.landing_page_slug,
         "referred_by_lead_id": lead.referred_by_lead_id,
         "metadata": _metadata(lead),
         "created_at": lead.created_at.isoformat() if lead.created_at else None,
@@ -246,6 +247,7 @@ def capture(body: LeadCaptureBody, db: Session = Depends(get_db)) -> dict:
         utm_content=body.utm_content.strip(),
         utm_term=body.utm_term.strip(),
         landing_variant=body.landing_variant.strip(),
+        landing_page_slug=page_row.slug if page_row is not None else None,
         referral_code=None,
         referred_by_lead_id=referrer.id if referrer else None,
         next_action=default_next_action("capture"),
@@ -324,6 +326,7 @@ def list_leads(
     q: str = "",
     status: str = "",
     source: str = "",
+    page: str = "",
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
@@ -336,6 +339,9 @@ def list_leads(
         if source not in LEAD_SOURCES:
             raise HTTPException(status_code=400, detail=f"source must be one of: {sorted(LEAD_SOURCES)}")
         stmt = stmt.where(Lead.source == source)
+    # P7 #2: narrow to one custom page's captures ("" = all pages).
+    if page.strip():
+        stmt = stmt.where(Lead.landing_page_slug == page.strip().lower()[:60])
     if q.strip():
         like = f"%{q.strip().lower()}%"
         stmt = stmt.where(
@@ -353,13 +359,14 @@ def export_leads_csv(user: User = Depends(get_current_user), db: Session = Depen
     writer = csv.writer(buffer)
     writer.writerow(
         ["id", "created_at", "source", "status", "name", "phone", "email", "area",
-         "deal_type", "property_type", "budget", "intent_notes", "consent_timestamp"]
+         "landing_page_slug", "deal_type", "property_type", "budget", "intent_notes", "consent_timestamp"]
     )
     for l in rows:
         md = _metadata(l)
         writer.writerow(
             [l.id, l.created_at.isoformat() if l.created_at else "", l.source, l.status, l.name,
-             l.phone, l.email, l.area, md.get("deal_type", ""), md.get("property_type", ""),
+             l.phone, l.email, l.area, l.landing_page_slug or "",
+             md.get("deal_type", ""), md.get("property_type", ""),
              md.get("budget", ""), l.intent_notes,
              l.consent_timestamp.isoformat() if l.consent_timestamp else ""]
         )

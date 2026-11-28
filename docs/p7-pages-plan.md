@@ -1,4 +1,4 @@
-# P7 #1 — Custom landing pages (block builder, zero-cost)
+# P7 — Custom landing pages: block builder (#1) + analytics (#2)
 
 Goal: let a workspace publish more than one landing page without touching the
 template-driven page. A page is a list of validated, **text-only** blocks on its
@@ -73,3 +73,48 @@ property extras) is untouched.
 - Rich text/HTML, images upload (URLs only), custom domains, per-block A/B,
   scheduled publishing, page duplication/templates. These would add cost or
   risk and are separate decisions.
+
+# P7 #2 — Custom page analytics & per-page leads
+
+Goal: close the measurement gap created by P7 #1. A custom page can now show
+how many people visited it, how many started the form and how many leads it
+produced — without cookies, PII or an external analytics service.
+
+## What shipped
+
+| Piece | Detail |
+| --- | --- |
+| Event capture | `POST /api/public/pages/{slug}/events` (`page_view`, `form_start`, `submit`), published pages only, silent `204` |
+| Path safety | The server stores `/p/<slug>` itself; a spoofed path cannot pollute `/l/<slug>` numbers |
+| Page stats | `GET /api/pages` adds grouped `views`, `leads`, `conversion_pct`, `conversion_known` (30-day window) |
+| Page report | `GET /api/pages/{id}/analytics?days=…` reuses the existing analytics summary (daily buckets, honest notes) |
+| Lead attribution | `leads.landing_page_slug` column (nullable, indexed); capture sets it and reports expose it |
+| Lead filter | `GET /api/leads?page=<slug>` + Leads-list dropdown, source badge and CSV column |
+| Frontend | Settings page list shows 30-day views/leads; "Stats" expands visitors/starts/submits plus a 7-day table |
+
+## Honest reporting rules
+
+- Rates are raw facts (e.g. 1 lead / 3 views = `33.3%`) but are labelled **too
+  early** until 30 views; no estimated or projected numbers.
+- Events are first-party and cookie-free: ad blockers or JS-disabled visitors
+  may be missing, and this is stated in the report notes.
+- Client-side `submit` events can repeat; server-side lead captures are the
+  authoritative number.
+- Template-page leads never inflate a custom page: the report filters on
+  `landing_page_slug`.
+
+## Migration
+
+Additive, idempotent: `python scripts/add_page_lead_source.py` (from `backend/`)
+adds `leads.landing_page_slug` and its index, then backfills any leads that were
+captured between P7 #1 and P7 #2 from their existing `metadata.landing_page`
+value. Important: `create_all` creates missing tables but **not** missing
+columns, so this must run before the backend that reads the column is deployed.
+
+## Caveat: renaming a slug
+
+Renaming changes `/p/<old>` to `/p/<new>`. Historical analytics events and lead
+attribution keep the old slug (history is never rewritten), so the page's stats
+start from zero under the new slug and old links stop working. The editor warns
+about this before saving.
+
