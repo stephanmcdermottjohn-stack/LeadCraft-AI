@@ -45,7 +45,9 @@ function AuthScreen({ onAuthed }) {
           : { business_name: form.business_name, email: form.email, password: form.password };
       const body = await api(path, { method: "POST", body: JSON.stringify(payload) });
       setSession(body.token, body.user);
-      onAuthed(body.user);
+      // The welcome tour is triggered only by a fresh registration, never by a
+      // normal login. Existing accounts therefore never see it retroactively.
+      onAuthed(body.user, { isNew: mode === "register" });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Auth failed.");
     } finally {
@@ -95,6 +97,229 @@ function AuthScreen({ onAuthed }) {
           {mode === "login" ? "No account? Register" : "Have an account? Log in"}
         </button>
       </form>
+    </div>
+  );
+}
+
+// One-time welcome tour shown immediately after account creation. It is a
+// static, client-only screen: no API calls, no tracking, no auto-anything.
+// Existing users never see it because DashboardApp only opens it from the
+// register path (and remembers per-user completion in localStorage).
+const INTRO_BANNERS = [
+  {
+    icon: "target",
+    accent: "border-sky-500/25 bg-sky-500/10 text-sky-400",
+    title: "Get potential leads — not random traffic",
+    body:
+      "Publish a landing page for your business, or build your own from ready-made blocks. Every form records consent and where the lead came from, so you know exactly who to follow up with.",
+    chips: ["Landing pages", "Custom pages", "Per-page stats"],
+    cta: "Set up your pages",
+    go: "Settings",
+  },
+  {
+    icon: "sparkles",
+    accent: "border-violet-500/25 bg-violet-500/10 text-violet-400",
+    title: "Plan a week of content in minutes",
+    body:
+      "Generate on-brand posts for Facebook, Instagram, TikTok and WhatsApp status. You review, edit and schedule — the platform never publishes behind your back.",
+    chips: ["AI drafts", "Brand voice", "Scheduling"],
+    cta: "Create your first post",
+    go: "Content",
+  },
+  {
+    icon: "chart",
+    accent: "border-emerald-500/25 bg-emerald-500/10 text-emerald-400",
+    title: "See what's working — honestly",
+    body:
+      "Follow the journey from first visit to won deal. Reports show real counts, and anything still unknown is labelled unknown instead of being filled with a made-up number.",
+    chips: ["Funnel", "Source reports", "Revenue"],
+    cta: "Open reports",
+    go: "Reports",
+  },
+  {
+    icon: "chat",
+    accent: "border-amber-500/25 bg-amber-500/10 text-amber-400",
+    title: "Keep every follow-up in one place",
+    body:
+      "Log chats and notes on each lead, take bookings from your public page, and always see the next action. Replies stay manual and consent-first — no auto-messaging.",
+    chips: ["Lead timeline", "Bookings", "Conversation log"],
+    cta: "Open conversations",
+    go: "Conversations",
+  },
+];
+
+function IntroIcon({ name, className = "h-5 w-5" }) {
+  const common = {
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 1.7,
+    strokeLinecap: "round",
+    strokeLinejoin: "round",
+    className,
+    "aria-hidden": true,
+  };
+  if (name === "target") {
+    return (
+      <svg {...common}>
+        <circle cx="12" cy="12" r="9" />
+        <circle cx="12" cy="12" r="5" />
+        <circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none" />
+      </svg>
+    );
+  }
+  if (name === "sparkles") {
+    return (
+      <svg {...common}>
+        <path d="M11 3l1.7 4.3L17 9l-4.3 1.7L11 15l-1.7-4.3L5 9l4.3-1.7L11 3z" />
+        <path d="M18.5 14.5l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8.8-2z" />
+      </svg>
+    );
+  }
+  if (name === "chart") {
+    return (
+      <svg {...common}>
+        <path d="M4 19h16" />
+        <path d="M7 16v-5" />
+        <path d="M12 16V7" />
+        <path d="M17 16v-3" />
+      </svg>
+    );
+  }
+  return (
+    <svg {...common}>
+      <path d="M20 15a2 2 0 0 1-2 2H8l-4 4V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2z" />
+      <path d="M8 8h8M8 11h5" />
+    </svg>
+  );
+}
+
+function WelcomeIntro({ user, onDone, onGo }) {
+  const businessName = (user?.business_name || "your business").trim();
+  const scrollToFeatures = () => {
+    const el = document.getElementById("intro-features");
+    if (el && typeof el.scrollIntoView === "function") {
+      el.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  };
+
+  return (
+    <div className="relative min-h-screen overflow-hidden bg-slate-950 text-slate-100">
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute -top-48 left-1/2 h-[30rem] w-[30rem] -translate-x-1/2 rounded-full bg-sky-500/10 blur-3xl"
+      />
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute -bottom-24 right-0 h-80 w-80 rounded-full bg-emerald-500/5 blur-3xl"
+      />
+
+      <main className="relative mx-auto w-full max-w-5xl px-4 py-8 sm:px-6 sm:py-12">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-sky-500/15 text-xs font-bold tracking-wide text-sky-400 ring-1 ring-inset ring-sky-500/30">
+              LC
+            </span>
+            <span className="text-sm font-semibold tracking-wide text-slate-200">LeadCraft AI</span>
+          </div>
+          <button
+            type="button"
+            onClick={onDone}
+            className="rounded-lg px-3 py-1.5 text-xs font-medium text-slate-400 transition hover:bg-slate-900 hover:text-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-400"
+          >
+            Skip intro
+          </button>
+        </div>
+
+        <section className="mt-10 sm:mt-14">
+          <span className="inline-flex items-center gap-2 rounded-full border border-emerald-500/25 bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-400">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+            Your workspace is ready
+          </span>
+          <p className="mt-5 text-xs font-semibold uppercase tracking-[0.18em] text-sky-400">
+            Welcome aboard, {businessName}
+          </p>
+          <h1 className="mt-2 max-w-3xl text-3xl font-bold leading-tight sm:text-5xl">
+            Meet LeadCraft AI — <span className="text-sky-400">your business copilot.</span>
+          </h1>
+          <p className="mt-4 max-w-2xl text-base leading-7 text-slate-400">
+            Capture consented leads, create content, keep follow-ups together and see what actually brings customers
+            in. No auto-spam, no fake scores, and nothing here needs a paid add-on to start.
+          </p>
+          <div className="mt-5 flex flex-wrap gap-2">
+            {["Free to start", "Consent-first", "No auto-spam"].map((chip) => (
+              <span
+                key={chip}
+                className="rounded-full border border-slate-800 bg-slate-900/70 px-3 py-1 text-xs text-slate-300"
+              >
+                {chip}
+              </span>
+            ))}
+          </div>
+          <div className="mt-7 flex flex-col gap-3 sm:flex-row">
+            <button
+              type="button"
+              onClick={onDone}
+              className="rounded-lg bg-sky-600 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-sky-950/40 transition hover:bg-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-400 focus:ring-offset-2 focus:ring-offset-slate-950"
+            >
+              Open my dashboard
+            </button>
+            <button
+              type="button"
+              onClick={scrollToFeatures}
+              className="rounded-lg border border-slate-700 bg-slate-900/60 px-5 py-2.5 text-sm font-semibold text-slate-200 transition hover:border-slate-600 hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-400 focus:ring-offset-2 focus:ring-offset-slate-950"
+            >
+              See what's inside
+            </button>
+          </div>
+        </section>
+
+        <section id="intro-features" className="mt-12 grid gap-4 scroll-mt-6 md:grid-cols-2">
+          {INTRO_BANNERS.map((banner) => (
+            <article
+              key={banner.title}
+              className="group rounded-2xl border border-slate-800 bg-slate-900/60 p-5 transition hover:-translate-y-0.5 hover:border-slate-700 hover:bg-slate-900"
+            >
+              <div className={`inline-flex h-10 w-10 items-center justify-center rounded-xl border ${banner.accent}`}>
+                <IntroIcon name={banner.icon} />
+              </div>
+              <h3 className="mt-3 text-base font-semibold text-slate-100">{banner.title}</h3>
+              <p className="mt-1.5 text-sm leading-6 text-slate-400">{banner.body}</p>
+              <ul className="mt-3 flex flex-wrap gap-1.5">
+                {banner.chips.map((chip) => (
+                  <li
+                    key={chip}
+                    className="rounded-md border border-slate-800 bg-slate-950/60 px-2 py-0.5 text-[11px] text-slate-400"
+                  >
+                    {chip}
+                  </li>
+                ))}
+              </ul>
+              <button
+                type="button"
+                onClick={() => onGo(banner.go)}
+                className="mt-4 inline-flex items-center gap-1 text-sm font-medium text-sky-400 transition hover:text-sky-300 focus:outline-none focus:ring-2 focus:ring-sky-400"
+              >
+                {banner.cta}
+                <span aria-hidden="true">→</span>
+              </button>
+            </article>
+          ))}
+        </section>
+
+        <div className="mt-8 flex flex-col items-start justify-between gap-3 rounded-xl border border-slate-800 bg-slate-900/50 p-4 sm:flex-row sm:items-center">
+          <p className="text-xs text-slate-500">
+            Everything here lives in your sidebar. This one-time intro won't appear again.
+          </p>
+          <button
+            type="button"
+            onClick={onDone}
+            className="rounded-lg border border-slate-700 px-4 py-2 text-xs font-semibold text-slate-200 transition hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-400"
+          >
+            Start with dashboard
+          </button>
+        </div>
+      </main>
     </div>
   );
 }
@@ -5296,6 +5521,22 @@ export default function App() {
 function DashboardApp() {
   const [user, setUser] = useState(getUser());
   const [active, setActive] = useState("Dashboard");
+  // One-time welcome tour: only a successful registration opens it. The flag is
+  // remembered per account so a refresh can never replay it.
+  const [showIntro, setShowIntro] = useState(false);
+  const handleAuthed = (nextUser, opts = {}) => {
+    setUser(nextUser);
+    if (!opts.isNew) return;
+    let alreadySeen = false;
+    try {
+      const key = `lc_intro_seen_${nextUser.id}`;
+      alreadySeen = Boolean(localStorage.getItem(key));
+      if (!alreadySeen) localStorage.setItem(key, "1");
+    } catch {
+      /* private mode: show it once for this session */
+    }
+    if (!alreadySeen) setShowIntro(true);
+  };
   // White-label (P3 #2): the header follows the workspace's branding. Read
   // errors are ignored — the default platform name is the honest fallback.
   const [brand, setBrand] = useState(null);
@@ -5306,7 +5547,20 @@ function DashboardApp() {
       .catch(() => {});
   }, [user]);
 
-  if (!user) return <AuthScreen onAuthed={setUser} />;
+  if (!user) return <AuthScreen onAuthed={handleAuthed} />;
+
+  if (showIntro) {
+    return (
+      <WelcomeIntro
+        user={user}
+        onDone={() => setShowIntro(false)}
+        onGo={(tab) => {
+          setShowIntro(false);
+          setActive(tab);
+        }}
+      />
+    );
+  }
 
   const brandText = displayBrandName(brand?.brand_name, "");
   const brandName = brandText || (brand?.hide_platform_brand ? user.business_name : "LeadCraft AI");

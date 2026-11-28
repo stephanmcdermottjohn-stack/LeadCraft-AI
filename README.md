@@ -77,6 +77,7 @@ pytest
 - Secrets: copy `docs/.env.example` → `backend/.env`; never commit real keys.
 - `docs/api-contracts.md` lists current + planned endpoints and the consent rules encoded in them.
 - Pending work, owner actions and the final go-live checklist: `docs/pending-todo.md`.
+- New accounts see a one-time welcome tour (client-only, no API calls, no tracking) that explains the four main services; it never appears on login, for existing users, or again after the first view.
 - Telephony is design-only (no code/keys/spend): `docs/p2-voice-design.md`.
 - Production preflight (read-only, no login): `powershell -ExecutionPolicy Bypass -File scripts_local\preflight_check.ps1` — add `-Slug <landing-slug>` to also check a real public page.
 - Phase 1 uses `create_all()` for MVP; add Alembic migrations before real production data.
