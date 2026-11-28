@@ -3,6 +3,10 @@
 Baseline: LeadCraft AI (FastAPI + SQLAlchemy 2 + React/Vite + Supabase Postgres, live on Vercel).
 Principle: **enhancement only** — every item below reuses the existing auth, tenant-scoping, migration, testing and deploy infrastructure.
 
+**Open items and go-live steps:** `docs/pending-todo.md` (single source of truth).
+Phase status below stays the product view; the todo file tracks what is actually
+left, who owns it, and which gate blocks it.
+
 ---
 
 ## 1. Existing Feature Inventory (audited 2026-11-17)
@@ -67,7 +71,13 @@ Landing-page/form builder (block-based, variants, A/B on headline/CTA/length rep
 Shipped so far: **A/B variants** (P1 #1), **nurture v1** (P1 #2), **unified inbox v1** (P1 #3), **website analytics v1** (P1 #4), **funnel/campaign reports** (P1 #5), **custom block pages** (P7 #1 — `/p/<slug>`, text-only blocks, consent-first capture, drafts hidden) and **custom page analytics + per-page leads** (P7 #2 — cookie-free views/starts/submits, `leads.landing_page_slug`, page filter and CSV column). Plan: `docs/p7-pages-plan.md`. A drag-and-drop builder, rich text and per-block A/B remain future work.
 
 ### P2 — Advanced Intelligence (design first, then approve)
-B2B visitor identification via a vetted provider (optional, off by default); voice module design (CallHippo-inspired) pending a telephony provider evaluation incl. Pakistan number/regulatory verification; review/referral workflows; advanced attribution.
+B2B visitor identification via a vetted provider (optional, off by default); review/referral workflows; advanced attribution.
+
+Voice/telephony design is now **complete as a design gate**: `docs/p2-voice-design.md`
+(provider quote template, Pakistan PTA/number/recording checklist, proposed
+`phone_numbers`/`call_events` schema, cost caps per workspace, test plan,
+explicit no-code-until-budget rule). No provider code, key or spend exists.
+Visitor identification remains design-only in `docs/p2-provider-design.md`.
 
 ### P3 — Commercial Scale
 Agency workspaces, white-label, billing, enterprise permissions. Plan:
@@ -78,7 +88,8 @@ footer/support email, platform-brand toggle on the dashboard and landing
 page), and **manual billing ledger v1** (owner/admin-recorded payments,
 currency-grouped totals, plan label — no gateway, no enforcement). Agency
 multi-workspace remains design-only until approved (requires a `workspace_id`
-migration across all data tables).
+migration across all data tables) — see `docs/p3-agency-design.md` for the
+sign-off checklist and `docs/pending-todo.md` for the gate.
 
 ### P4 — Integrations & real-time capture
 Plan: `docs/p4-plan.md`. Shipped: **webhook core** (`webhook_events`
@@ -188,7 +199,7 @@ Data-retention rule: history tables append-only; deletion cascades with lead.
 
 - **P0: zero external cost.** Everything rule-based; optional BANT AI extraction uses the existing Gemini free tier (already configured). No new credentials.
 - **P1: zero required cost.** First-party analytics on existing Supabase; nurture uses DB + scheduler. Email delivery, if added, would need a provider (Brevo/Mailgun free tiers ~100–300/day) — decision deferred with cost-benefit note.
-- **P2: paid, opt-in only.** Visitor identification providers (Leadfeeder/Albacross-class, free tiers are site-count limited); telephony (Twilio-class, per-minute + number rental) — **requires explicit cost-benefit approval + Pakistan number/regulatory verification before any integration**. Voice stays design-only until then.
+- **P2: paid, opt-in only.** Visitor identification providers (Leadfeeder/Albacross-class, free tiers are site-count limited); telephony (Twilio-class, per-minute + number rental) — **requires explicit cost-benefit approval + Pakistan number/regulatory verification before any integration**. Voice stays design-only until then; the completed gate (quotes, PTA checklist, `call_events` model, per-workspace cap) is `docs/p2-voice-design.md`.
 - Rule honored: paid providers are never required for core app function.
 
 ## 8. Security & Compliance Risks (P0-relevant)
